@@ -8,23 +8,9 @@ import (
 
 type (
 	CreateServerReq struct {
-		Name                       string `json:"Name"`
-		Color                      string `json:"Color"`
-		SmtpApiActivated           bool   `json:"SmtpApiActivated"`
-		RawEmailEnabled            bool   `json:"RawEmailEnabled"`
-		DeliveryType               string `json:"DeliveryType"`
-		InboundHookUrl             string `json:"InboundHookUrl"`
-		BounceHookUrl              string `json:"BounceHookUrl"`
-		OpenHookUrl                string `json:"OpenHookUrl"`
-		DeliveryHookUrl            string `json:"DeliveryHookUrl"`
-		PostFirstOpenOnly          bool   `json:"PostFirstOpenOnly"`
-		InboundDomain              string `json:"InboundDomain"`
-		InboundSpamThreshold       int    `json:"InboundSpamThreshold"`
-		TrackOpens                 bool   `json:"TrackOpens"`
-		TrackLinks                 string `json:"TrackLinks"`
-		IncludeBounceContentInHook bool   `json:"IncludeBounceContentInHook"`
-		ClickHookUrl               string `json:"ClickHookUrl"`
-		EnableSmtpApiErrorHooks    bool   `json:"EnableSmtpApiErrorHooks"`
+		Name             string `json:"Name"`
+		Color            string `json:"Color"`
+		SmtpApiActivated bool   `json:"SmtpApiActivated"`
 	}
 
 	UpdateServerReq struct {

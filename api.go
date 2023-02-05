@@ -15,11 +15,10 @@ type (
 		Do(req *http.Request) (*http.Response, error)
 	}
 	API struct {
-		client    Doer
-		timeout   time.Duration
-		baseHost  string
-		token     string
-		userAgent string
+		client   Doer
+		timeout  time.Duration
+		baseHost string
+		token    string
 	}
 	Req struct {
 		URI, Body string
@@ -32,18 +31,16 @@ type (
 )
 
 var (
-	defaultUA         = "go-postmark/0.1"
 	defaultTimeOut    = time.Duration(10) * time.Second
 	defaultHttpClient = &http.Client{Timeout: defaultTimeOut}
 )
 
 func New(options ...Option) *API {
 	api := &API{
-		userAgent: defaultUA,
-		baseHost:  "https://api.postmarkapp.com",
-		token:     os.Getenv("POSTMARK_API_TOKEN"),
-		timeout:   defaultTimeOut,
-		client:    defaultHttpClient,
+		baseHost: "https://api.postmarkapp.com",
+		token:    os.Getenv("POSTMARK_API_TOKEN"),
+		timeout:  defaultTimeOut,
+		client:   defaultHttpClient,
 	}
 
 	// Apply Dynamic Caller Opts
@@ -71,9 +68,9 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Add("X-Postmark-Account-Token", a.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Postmark-Account-Token", a.token)
 
 	return req, nil
 }

@@ -11,12 +11,6 @@ func HTTPClientOpt(client *http.Client) Option {
 	}
 }
 
-func UserAgentOpt(ua string) Option {
-	return func(api *API) {
-		api.userAgent = ua
-	}
-}
-
 func APITokenOpt(token string) Option {
 	return func(api *API) {
 		api.token = token
