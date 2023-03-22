@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type (
@@ -98,7 +100,13 @@ func readResponse(resp *http.Response) (*Resp, error) {
 		return newResponse(respBody, resp), nil
 	}
 
-	return newResponse(respBody, resp), fmt.Errorf("postmark request failed with HTTP Status code: %v", resp.StatusCode)
+	var pmError PostmarkErr
+	err = json.NewDecoder(resp.Body).Decode(&pmError)
+	if err != nil {
+		return newResponse(respBody, resp), errors.Wrap(err, "failed to decode postmark err")
+	}
+
+	return newResponse(respBody, resp), pmError
 }
 
 func newResponse(body []byte, resp *http.Response) *Resp {

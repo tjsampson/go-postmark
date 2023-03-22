@@ -66,7 +66,29 @@ type (
 		ErrorCode int    `json:"ErrorCode"`
 		Message   string `json:"Message"`
 	}
+
+	PostmarkErr struct {
+		ErrorCode int    `json:"ErrorCode"`
+		Message   string `json:"Message"`
+	}
 )
+
+var ErrExists = NewError(http.StatusConflict, "server already exists")
+
+func (pe PostmarkErr) Error() string {
+	return fmt.Sprintf("%s Error Code=%v", pe.Message, pe.ErrorCode)
+}
+
+func (pe PostmarkErr) Code() int {
+	return pe.ErrorCode
+}
+
+func NewError(code int, format string, a ...interface{}) *PostmarkErr {
+	return &PostmarkErr{
+		ErrorCode: code,
+		Message:   fmt.Sprintf(format, a...),
+	}
+}
 
 func (a *API) CreateServer(serverReq *CreateServerReq) (*ServerResp, error) {
 	req, err := a.newRequest(http.MethodPost, "servers", serverReq)
