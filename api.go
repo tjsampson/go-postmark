@@ -101,9 +101,9 @@ func readResponse(resp *http.Response) (*Resp, error) {
 	}
 
 	var pmError PostmarkErr
-	err = json.NewDecoder(resp.Body).Decode(&pmError)
+	err = json.Unmarshal(respBody, &pmError)
 	if err != nil {
-		return newResponse(respBody, resp), errors.Wrap(err, "failed to decode postmark err")
+		return newResponse(respBody, resp), errors.Wrap(err, "failed to unmarshal postmark err")
 	}
 
 	return newResponse(respBody, resp), pmError
