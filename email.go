@@ -24,6 +24,11 @@ type (
 	// SendEmailReq is the request body for sending a single email via POST /email.
 	// All fields correspond directly to the Postmark Email API documented at
 	// https://postmarkapp.com/developer/api/email-api.
+	//
+	// TrackOpens is a *bool so that an explicit false is serialised as
+	// {"TrackOpens":false} rather than being omitted from the JSON payload.
+	// A nil value causes the field to be omitted, which lets the message-stream
+	// default take effect — the same behaviour as not setting the field at all.
 	SendEmailReq struct {
 		From          string            `json:"From"`
 		To            string            `json:"To"`
@@ -37,7 +42,7 @@ type (
 		Metadata      map[string]string `json:"Metadata,omitempty"`
 		Headers       []MailHeader      `json:"Headers,omitempty"`
 		Attachments   []Attachment      `json:"Attachments,omitempty"`
-		TrackOpens    bool              `json:"TrackOpens,omitempty"`
+		TrackOpens    *bool             `json:"TrackOpens,omitempty"`
 		TrackLinks    string            `json:"TrackLinks,omitempty"`
 		MessageStream string            `json:"MessageStream,omitempty"`
 	}
@@ -54,6 +59,13 @@ type (
 
 	// TemplateMessage is a single message entry in a batch-with-templates request.
 	// It mirrors the individual message object accepted by POST /email/batchWithTemplates.
+	//
+	// Either TemplateID or TemplateAlias must be supplied; both may not be omitted.
+	// SendEmailBatchWithTemplates performs a pre-flight check and returns an error
+	// if neither field is set on any message in the batch.
+	//
+	// InlineCss is a *bool so that an explicit false is serialised correctly
+	// (see SendEmailReq.TrackOpens for the full rationale).
 	TemplateMessage struct {
 		From          string            `json:"From"`
 		To            string            `json:"To"`
@@ -64,14 +76,14 @@ type (
 		Metadata      map[string]string `json:"Metadata,omitempty"`
 		Headers       []MailHeader      `json:"Headers,omitempty"`
 		Attachments   []Attachment      `json:"Attachments,omitempty"`
-		TrackOpens    bool              `json:"TrackOpens,omitempty"`
+		TrackOpens    *bool             `json:"TrackOpens,omitempty"`
 		TrackLinks    string            `json:"TrackLinks,omitempty"`
 		MessageStream string            `json:"MessageStream,omitempty"`
 		// Template identification — supply either TemplateID or TemplateAlias.
-		TemplateID    int64             `json:"TemplateId,omitempty"`
-		TemplateAlias string            `json:"TemplateAlias,omitempty"`
-		TemplateModel map[string]interface{} `json:"TemplateModel,omitempty"`
-		InlineCss     bool              `json:"InlineCss,omitempty"`
+		TemplateID    int64          `json:"TemplateId,omitempty"`
+		TemplateAlias string         `json:"TemplateAlias,omitempty"`
+		TemplateModel map[string]any `json:"TemplateModel,omitempty"`
+		InlineCss     *bool          `json:"InlineCss,omitempty"`
 	}
 
 	// SendBatchWithTemplatesReq is the request body for POST /email/batchWithTemplates.
@@ -80,9 +92,14 @@ type (
 	}
 
 	// SendBatchWithTemplatesResp is the response envelope for POST /email/batchWithTemplates.
+	//
+	// Errors contains batch-level validation errors that prevent individual
+	// messages from being submitted (distinct from per-message ErrorCode values
+	// reported inside each Messages entry). BatchEmailErr captures the ErrorCode
+	// and Message fields that Postmark returns for each such failure.
 	SendBatchWithTemplatesResp struct {
-		TotalCount int              `json:"TotalCount"`
-		Errors     []BatchEmailErr  `json:"Errors"`
+		TotalCount int             `json:"TotalCount"`
+		Errors     []BatchEmailErr `json:"Errors"`
 		Messages   []*SendEmailResp `json:"Messages"`
 	}
 
@@ -104,9 +121,9 @@ func (a *API) SendEmail(emailReq *SendEmailReq) (*SendEmailResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data SendEmailResp
@@ -119,8 +136,14 @@ func (a *API) SendEmail(emailReq *SendEmailReq) (*SendEmailResp, error) {
 // SendEmailBatch sends up to 500 emails in a single POST /email/batch call.
 // It returns a slice of SendEmailResp values — one per submitted message — in
 // the same order as the input slice.
-// An error is returned if the batch exceeds the Postmark limit of 500 messages.
+//
+// An error is returned if:
+//   - the batch is empty (Postmark requires at least one message), or
+//   - the batch exceeds the Postmark limit of 500 messages.
 func (a *API) SendEmailBatch(reqs []*SendEmailReq) ([]*SendEmailResp, error) {
+	if len(reqs) == 0 {
+		return nil, fmt.Errorf("batch must contain at least one message")
+	}
 	if len(reqs) > maxBatchSize {
 		return nil, fmt.Errorf("batch size %d exceeds the maximum of %d", len(reqs), maxBatchSize)
 	}
@@ -128,9 +151,9 @@ func (a *API) SendEmailBatch(reqs []*SendEmailReq) ([]*SendEmailResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data []*SendEmailResp
@@ -143,14 +166,31 @@ func (a *API) SendEmailBatch(reqs []*SendEmailReq) ([]*SendEmailResp, error) {
 // SendEmailBatchWithTemplates sends a batch of template-based emails via
 // POST /email/batchWithTemplates. Each message in the batch must reference a
 // Postmark template by ID or alias and supply the corresponding model.
+//
+// An error is returned if:
+//   - the batch is empty,
+//   - the batch exceeds the Postmark limit of 500 messages, or
+//   - any message omits both TemplateID and TemplateAlias.
 func (a *API) SendEmailBatchWithTemplates(batchReq *SendBatchWithTemplatesReq) (*SendBatchWithTemplatesResp, error) {
+	if len(batchReq.Messages) == 0 {
+		return nil, fmt.Errorf("batch must contain at least one message")
+	}
+	if len(batchReq.Messages) > maxBatchSize {
+		return nil, fmt.Errorf("batch size %d exceeds the maximum of %d", len(batchReq.Messages), maxBatchSize)
+	}
+	for i, msg := range batchReq.Messages {
+		if msg.TemplateID == 0 && msg.TemplateAlias == "" {
+			return nil, fmt.Errorf("message at index %d must set either TemplateID or TemplateAlias", i)
+		}
+	}
+
 	req, err := a.newServerRequest(http.MethodPost, "email/batchWithTemplates", batchReq)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data SendBatchWithTemplatesResp

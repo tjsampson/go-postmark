@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+// boolPtr is a test helper that returns a pointer to the given bool value,
+// which is needed when setting *bool fields such as TrackOpens or InlineCss.
+func boolPtr(b bool) *bool { return &b }
+
 // ---- ServerTokenOpt ------------------------------------------------------------
 
 func TestNew_WithServerTokenOpt(t *testing.T) {
@@ -30,6 +34,24 @@ func TestNewServerRequest_SetsServerTokenHeader(t *testing.T) {
 	// Must NOT set the account-token header.
 	if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
 		t.Errorf("X-Postmark-Account-Token should be empty, got %q", got)
+	}
+}
+
+// TestNewRequest_SetsAccountTokenHeader is the inverse of the above: newRequest
+// must set X-Postmark-Account-Token and must NOT set X-Postmark-Server-Token.
+// This guards against regressions from the buildRequest refactor.
+func TestNewRequest_SetsAccountTokenHeader(t *testing.T) {
+	api := New(APITokenOpt("my-account-token"))
+	req, err := api.newRequest(http.MethodGet, "servers/1", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := req.Header.Get("X-Postmark-Account-Token"); got != "my-account-token" {
+		t.Errorf("X-Postmark-Account-Token = %q, want %q", got, "my-account-token")
+	}
+	// Must NOT set the server-token header.
+	if got := req.Header.Get("X-Postmark-Server-Token"); got != "" {
+		t.Errorf("X-Postmark-Server-Token should be empty, got %q", got)
 	}
 }
 
@@ -64,9 +86,9 @@ func TestSendEmail_Success(t *testing.T) {
 	)
 
 	got, err := api.SendEmail(&SendEmailReq{
-		From:    "sender@example.com",
-		To:      "receiver@example.com",
-		Subject: "Hello",
+		From:     "sender@example.com",
+		To:       "receiver@example.com",
+		Subject:  "Hello",
 		HtmlBody: "<p>Hi</p>",
 	})
 	if err != nil {
@@ -123,16 +145,16 @@ func TestSendEmail_WithMetadataAndHeaders(t *testing.T) {
 	)
 
 	emailReq := &SendEmailReq{
-		From:    "from@example.com",
-		To:      "to@example.com",
-		Subject: "Metadata test",
+		From:     "from@example.com",
+		To:       "to@example.com",
+		Subject:  "Metadata test",
 		TextBody: "Hello",
 		Metadata: map[string]string{"customer-id": "abc123"},
 		Headers:  []MailHeader{{Name: "X-Custom", Value: "my-value"}},
 		Attachments: []Attachment{
 			{Name: "file.txt", Content: "aGVsbG8=", ContentType: "text/plain"},
 		},
-		TrackOpens: true,
+		TrackOpens: boolPtr(true),
 		TrackLinks: "None",
 	}
 
@@ -149,6 +171,43 @@ func TestSendEmail_WithMetadataAndHeaders(t *testing.T) {
 	}
 	if len(capturedBody.Attachments) != 1 || capturedBody.Attachments[0].Name != "file.txt" {
 		t.Errorf("unexpected attachments: %+v", capturedBody.Attachments)
+	}
+}
+
+// TestSendEmail_TrackOpensFalseIsSerialised verifies that explicitly setting
+// TrackOpens to false results in the field being present in the JSON payload
+// (not silently dropped by omitempty), which was the bug with the old bool type.
+func TestSendEmail_TrackOpensFalseIsSerialised(t *testing.T) {
+	var capturedBody map[string]any
+
+	api := New(
+		ServerTokenOpt("srv-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{
+		From:       "f@example.com",
+		To:         "t@example.com",
+		TrackOpens: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := capturedBody["TrackOpens"]
+	if !ok {
+		t.Fatal("TrackOpens key is missing from JSON payload; false *bool must not be omitted")
+	}
+	if v != false {
+		t.Errorf("TrackOpens = %v, want false", v)
 	}
 }
 
@@ -196,6 +255,17 @@ func TestSendEmailBatch_Success(t *testing.T) {
 	}
 	if got[1].MessageID != "id-2" {
 		t.Errorf("got[1].MessageID = %q, want id-2", got[1].MessageID)
+	}
+}
+
+func TestSendEmailBatch_EmptySlice(t *testing.T) {
+	api := New(ServerTokenOpt("srv-token"))
+	_, err := api.SendEmailBatch([]*SendEmailReq{})
+	if err == nil {
+		t.Fatal("expected an error for empty batch, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one message") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
@@ -303,13 +373,13 @@ func TestSendEmailBatchWithTemplates_Success(t *testing.T) {
 				From:          "sender@example.com",
 				To:            "a@example.com",
 				TemplateID:    1001,
-				TemplateModel: map[string]interface{}{"name": "Alice"},
+				TemplateModel: map[string]any{"name": "Alice"},
 			},
 			{
 				From:          "sender@example.com",
 				To:            "b@example.com",
 				TemplateAlias: "welcome-email",
-				TemplateModel: map[string]interface{}{"name": "Bob"},
+				TemplateModel: map[string]any{"name": "Bob"},
 			},
 		},
 	}
@@ -352,7 +422,7 @@ func TestSendEmailBatchWithTemplates_RequestBody(t *testing.T) {
 				From:          "from@example.com",
 				To:            "to@example.com",
 				TemplateID:    42,
-				TemplateModel: map[string]interface{}{"key": "value"},
+				TemplateModel: map[string]any{"key": "value"},
 				MessageStream: "outbound",
 			},
 		},
@@ -395,5 +465,55 @@ func TestSendEmailBatchWithTemplates_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+}
+
+func TestSendEmailBatchWithTemplates_EmptyBatch(t *testing.T) {
+	api := New(ServerTokenOpt("srv-token"))
+	_, err := api.SendEmailBatchWithTemplates(&SendBatchWithTemplatesReq{
+		Messages: []*TemplateMessage{},
+	})
+	if err == nil {
+		t.Fatal("expected an error for empty batch, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one message") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSendEmailBatchWithTemplates_ExceedsMaxSize(t *testing.T) {
+	msgs := make([]*TemplateMessage, 501)
+	for i := range msgs {
+		msgs[i] = &TemplateMessage{
+			From:       "f@example.com",
+			To:         "t@example.com",
+			TemplateID: 1,
+		}
+	}
+
+	api := New(ServerTokenOpt("srv-token"))
+	_, err := api.SendEmailBatchWithTemplates(&SendBatchWithTemplatesReq{Messages: msgs})
+	if err == nil {
+		t.Fatal("expected an error for batch size > 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds the maximum") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSendEmailBatchWithTemplates_MissingTemplate(t *testing.T) {
+	// A message with neither TemplateID nor TemplateAlias must be rejected
+	// before making any HTTP request.
+	api := New(ServerTokenOpt("srv-token"))
+	_, err := api.SendEmailBatchWithTemplates(&SendBatchWithTemplatesReq{
+		Messages: []*TemplateMessage{
+			{From: "f@example.com", To: "t@example.com"}, // no TemplateID or TemplateAlias
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an error for missing template, got nil")
+	}
+	if !strings.Contains(err.Error(), "TemplateID") || !strings.Contains(err.Error(), "TemplateAlias") {
+		t.Errorf("error message should mention TemplateID and TemplateAlias, got: %v", err)
 	}
 }
