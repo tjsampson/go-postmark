@@ -100,16 +100,48 @@ func TestSendEmailWithTemplate_APIError(t *testing.T) {
 	}
 }
 
+// TestSendEmailWithTemplate_PostmarkErrorCode verifies that a Postmark logical
+// error (HTTP 200 with non-zero ErrorCode in the body) is surfaced as a
+// *PostmarkErr rather than silently returning a zero-value response.
+func TestSendEmailWithTemplate_PostmarkErrorCode(t *testing.T) {
+	// Postmark returns HTTP 200 with ErrorCode=406 when the template is unknown.
+	body := SendEmailResp{ErrorCode: 406, Message: "Unknown template"}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendWithTemplateReq{
+		TemplateID:    99999,
+		TemplateModel: map[string]string{},
+		From:          "sender@example.com",
+		To:            "recipient@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected a PostmarkErr for ErrorCode=406, got nil")
+	}
+	var pmErr *PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Fatalf("expected error to be *PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 406 {
+		t.Errorf("ErrorCode = %d, want 406", pmErr.ErrorCode)
+	}
+}
+
 // ---- GetTemplate ---------------------------------------------------------------
 
 func TestGetTemplate_Success(t *testing.T) {
 	want := TemplateResp{
-		TemplateID: 123,
-		Name:       "Welcome Email",
-		Subject:    "Welcome, {{name}}!",
-		HtmlBody:   "<h1>Welcome</h1>",
-		TextBody:   "Welcome",
-		Alias:      "welcome",
+		TemplateID:   123,
+		Name:         "Welcome Email",
+		Subject:      "Welcome, {{name}}!",
+		HtmlBody:     "<h1>Welcome</h1>",
+		TextBody:     "Welcome",
+		Alias:        "welcome",
 		TemplateType: "Standard",
 	}
 
@@ -181,6 +213,23 @@ func TestGetTemplate_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+// TestGetTemplate_EmptyID verifies that an empty templateID is rejected before
+// any HTTP request is made.
+func TestGetTemplate_EmptyID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for empty templateID")
+		return nil, nil
+	})))
+
+	_, err := api.GetTemplate("")
+	if err == nil {
+		t.Fatal("expected an error for empty templateID, got nil")
+	}
+	if !errors.Is(err, errEmptyTemplateID) {
+		t.Errorf("expected errEmptyTemplateID, got %v", err)
 	}
 }
 
@@ -298,6 +347,23 @@ func TestEditTemplate_NotFound(t *testing.T) {
 	}
 }
 
+// TestEditTemplate_EmptyID verifies that an empty templateID is rejected before
+// any HTTP request is made.
+func TestEditTemplate_EmptyID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for empty templateID")
+		return nil, nil
+	})))
+
+	_, err := api.EditTemplate("", &EditTemplateReq{Name: "Ghost"})
+	if err == nil {
+		t.Fatal("expected an error for empty templateID, got nil")
+	}
+	if !errors.Is(err, errEmptyTemplateID) {
+		t.Errorf("expected errEmptyTemplateID, got %v", err)
+	}
+}
+
 // ---- ListTemplates -------------------------------------------------------------
 
 func TestListTemplates_Success(t *testing.T) {
@@ -317,11 +383,11 @@ func TestListTemplates_Success(t *testing.T) {
 		if !strings.Contains(req.URL.Path, "/templates") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
-		if !strings.Contains(req.URL.RawQuery, "count=10") {
-			t.Errorf("expected count param, query=%s", req.URL.RawQuery)
+		if req.URL.Query().Get("count") != "10" {
+			t.Errorf("expected count=10, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(req.URL.RawQuery, "offset=0") {
-			t.Errorf("expected offset param, query=%s", req.URL.RawQuery)
+		if req.URL.Query().Get("offset") != "0" {
+			t.Errorf("expected offset=0, query=%s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -348,10 +414,10 @@ func TestListTemplates_WithOffset(t *testing.T) {
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.RawQuery, "count=5") {
+		if req.URL.Query().Get("count") != "5" {
 			t.Errorf("expected count=5, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(req.URL.RawQuery, "offset=5") {
+		if req.URL.Query().Get("offset") != "5" {
 			t.Errorf("expected offset=5, query=%s", req.URL.RawQuery)
 		}
 		return &http.Response{
@@ -410,6 +476,23 @@ func TestDeleteTemplate_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+// TestDeleteTemplate_EmptyID verifies that an empty templateID is rejected before
+// any HTTP request is made.
+func TestDeleteTemplate_EmptyID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for empty templateID")
+		return nil, nil
+	})))
+
+	_, err := api.DeleteTemplate("")
+	if err == nil {
+		t.Fatal("expected an error for empty templateID, got nil")
+	}
+	if !errors.Is(err, errEmptyTemplateID) {
+		t.Errorf("expected errEmptyTemplateID, got %v", err)
 	}
 }
 
