@@ -47,8 +47,7 @@ type (
 )
 
 var (
-	defaultTimeOut    = time.Duration(10) * time.Second
-	defaultHttpClient = &http.Client{Timeout: defaultTimeOut}
+	defaultTimeOut = time.Duration(10) * time.Second
 )
 
 // New creates and returns a new Postmark API client.
@@ -60,7 +59,7 @@ func New(options ...Option) *API {
 		baseHost: "https://api.postmarkapp.com",
 		token:    os.Getenv("POSTMARK_API_TOKEN"),
 		timeout:  defaultTimeOut,
-		client:   defaultHttpClient,
+		client:   &http.Client{Timeout: defaultTimeOut},
 	}
 
 	// Apply Dynamic Caller Opts
@@ -114,6 +113,7 @@ func (a *API) Do(req *http.Request) (*Resp, error) {
 // For non-2xx / non-404 status codes it attempts to unmarshal a PostmarkErr.
 // A 404 response returns ErrNotFound so callers can use errors.Is(err, ErrNotFound).
 func readResponse(resp *http.Response) (*Resp, error) {
+	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

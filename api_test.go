@@ -71,6 +71,38 @@ func TestNew_WithHTTPClientOpt(t *testing.T) {
 	}
 }
 
+// TestTimeoutOpt_AppliedToClient verifies that TimeoutOpt propagates the
+// timeout to the underlying *http.Client and does not mutate the default
+// client singleton.
+func TestTimeoutOpt_AppliedToClient(t *testing.T) {
+	api := New(TimeoutOpt(42 * time.Second))
+
+	hc, ok := api.client.(*http.Client)
+	if !ok {
+		t.Fatal("expected api.client to be *http.Client")
+	}
+	if hc.Timeout != 42*time.Second {
+		t.Errorf("expected client timeout 42s, got %v", hc.Timeout)
+	}
+
+	// The default client singleton must remain unmodified (10 s).
+	defaultClient := &http.Client{Timeout: defaultTimeOut}
+	if defaultClient.Timeout != 10*time.Second {
+		t.Errorf("default timeout should still be 10s, got %v", defaultClient.Timeout)
+	}
+
+	// More directly: verify that calling New with TimeoutOpt does not affect
+	// a freshly-created instance that uses the default timeout.
+	api2 := New()
+	hc2, ok := api2.client.(*http.Client)
+	if !ok {
+		t.Fatal("expected api2.client to be *http.Client")
+	}
+	if hc2.Timeout != 10*time.Second {
+		t.Errorf("default client timeout should be 10s after TimeoutOpt on another instance, got %v", hc2.Timeout)
+	}
+}
+
 // ---- PostmarkErr ---------------------------------------------------------------
 
 func TestPostmarkErr_Error(t *testing.T) {
@@ -291,5 +323,47 @@ func TestUpdateServer_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+// ---- Do / body-close -----------------------------------------------------------
+
+// trackingReadCloser is an io.ReadCloser that records whether Close was called.
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (t *trackingReadCloser) Close() error {
+	t.closed = true
+	return nil
+}
+
+// TestDo_BodyIsClosed verifies that Do closes the HTTP response body after
+// reading it, preventing connection leaks in the net/http transport pool.
+func TestDo_BodyIsClosed(t *testing.T) {
+	tracker := &trackingReadCloser{
+		Reader: strings.NewReader(`{}`),
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       tracker,
+		}, nil
+	})))
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.postmarkapp.com/servers/1", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	_, err = api.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error from Do: %v", err)
+	}
+
+	if !tracker.closed {
+		t.Error("expected resp.Body.Close() to be called, but it was not")
 	}
 }
