@@ -57,19 +57,59 @@ func TestListMessageStreams_Success(t *testing.T) {
 	}
 }
 
+// TestListMessageStreams_StreamTypeFilter exercises the streamType != "" branch,
+// verifying that MessageStreamType is included in the query string.
+func TestListMessageStreams_StreamTypeFilter(t *testing.T) {
+	want := ListMessageStreamsResp{
+		TotalCount:     1,
+		MessageStreams: []MessageStream{{ID: "outbound", MessageStreamType: "Transactional", ServerID: 1}},
+	}
+
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if !strings.Contains(req.URL.RawQuery, "MessageStreamType=Transactional") {
+				t.Errorf("expected MessageStreamType=Transactional in query, got %s", req.URL.RawQuery)
+			}
+			if !strings.Contains(req.URL.RawQuery, "IncludeArchivedStreams=false") {
+				t.Errorf("expected IncludeArchivedStreams=false in query, got %s", req.URL.RawQuery)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, want),
+			}, nil
+		})),
+	)
+
+	got, err := api.ListMessageStreams("Transactional", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TotalCount != 1 {
+		t.Errorf("TotalCount = %d, want 1", got.TotalCount)
+	}
+}
+
 func TestListMessageStreams_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal server error"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
 
 	_, err := api.ListMessageStreams("Transactional", false)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected a PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -117,13 +157,19 @@ func TestGetMessageStream_Success(t *testing.T) {
 	}
 }
 
+// TestGetMessageStream_NotFound asserts that a 404 response causes GetMessageStream
+// to return ErrNotFound (the sentinel defined in servers.go), detectable via
+// errors.Is. readResponse in api.go maps HTTP 404 → ErrNotFound directly.
 func TestGetMessageStream_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.GetMessageStream("nonexistent")
 	if err == nil {
@@ -187,12 +233,15 @@ func TestCreateMessageStream_Success(t *testing.T) {
 func TestCreateMessageStream_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 409, Message: "stream already exists"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusConflict,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusConflict,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
 
 	_, err := api.CreateMessageStream(&CreateMessageStreamReq{ID: "outbound", Name: "Outbound"})
 	if err == nil {
@@ -248,13 +297,18 @@ func TestUpdateMessageStream_Success(t *testing.T) {
 	}
 }
 
+// TestUpdateMessageStream_NotFound asserts that a 404 response causes
+// UpdateMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestUpdateMessageStream_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.UpdateMessageStream("nonexistent", &UpdateMessageStreamReq{Name: "Ghost"})
 	if err == nil {
@@ -309,15 +363,23 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 	if got.ArchivedAt == nil {
 		t.Error("expected ArchivedAt to be non-nil")
 	}
+	if got.ExpectedPurgeDate == nil {
+		t.Error("expected ExpectedPurgeDate to be non-nil")
+	}
 }
 
+// TestArchiveMessageStream_NotFound asserts that a 404 response causes
+// ArchiveMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestArchiveMessageStream_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.ArchiveMessageStream("nonexistent")
 	if err == nil {
@@ -374,13 +436,18 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	}
 }
 
+// TestUnarchiveMessageStream_NotFound asserts that a 404 response causes
+// UnarchiveMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestUnarchiveMessageStream_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
-		}, nil
-	})))
+	api := New(
+		APITokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Message stream not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.UnarchiveMessageStream("nonexistent")
 	if err == nil {

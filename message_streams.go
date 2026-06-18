@@ -17,15 +17,15 @@ type (
 
 	// MessageStream represents a Postmark Message Stream as returned by the API.
 	MessageStream struct {
-		ID                                  string                               `json:"ID"`
-		Name                                string                               `json:"Name"`
-		Description                         string                               `json:"Description"`
-		MessageStreamType                   string                               `json:"MessageStreamType"`
-		ServerID                            int                                  `json:"ServerID"`
-		CreatedAt                           time.Time                            `json:"CreatedAt"`
-		UpdatedAt                           time.Time                            `json:"UpdatedAt"`
-		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
-		ExpectedPurgeDate                   *time.Time                           `json:"ExpectedPurgeDate"`
+		ID                                  string                              `json:"ID"`
+		Name                                string                              `json:"Name"`
+		Description                         string                              `json:"Description"`
+		MessageStreamType                   string                              `json:"MessageStreamType"`
+		ServerID                            int                                 `json:"ServerID"`
+		CreatedAt                           time.Time                           `json:"CreatedAt"`
+		UpdatedAt                           time.Time                           `json:"UpdatedAt"`
+		ArchivedAt                          *time.Time                          `json:"ArchivedAt"`
+		ExpectedPurgeDate                   *time.Time                          `json:"ExpectedPurgeDate"`
 		SubscriptionManagementConfiguration SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration"`
 	}
 
@@ -38,10 +38,11 @@ type (
 	}
 
 	// UpdateMessageStreamReq is the request body for updating an existing Message Stream.
-	// Only the fields provided will be changed.
+	// Only the fields provided will be changed. Fields with omitempty are omitted when
+	// empty, preventing unintentional overwrites of existing values.
 	UpdateMessageStreamReq struct {
-		Name        string `json:"Name"`
-		Description string `json:"Description"`
+		Name        string `json:"Name,omitempty"`
+		Description string `json:"Description,omitempty"`
 	}
 
 	// ListMessageStreamsResp is the response envelope returned by the list message streams endpoint.
@@ -84,14 +85,13 @@ func (a *API) ListMessageStreams(streamType string, includeArchived bool) (*List
 	}
 	params.Set("IncludeArchivedStreams", fmt.Sprintf("%t", includeArchived))
 
-	path := "message-streams?" + params.Encode()
-	req, err := a.newServerRequest(http.MethodGet, path, nil)
+	req, err := a.newServerRequest(http.MethodGet, "message-streams?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListMessageStreamsResp
@@ -103,13 +103,13 @@ func (a *API) ListMessageStreams(streamType string, includeArchived bool) (*List
 
 // GetMessageStream fetches the Message Stream identified by id.
 func (a *API) GetMessageStream(id string) (*MessageStream, error) {
-	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", id), nil)
+	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStream
@@ -126,9 +126,9 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStream, 
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStream
@@ -141,13 +141,13 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStream, 
 // UpdateMessageStream applies the changes in req to the Message Stream identified
 // by id and returns the updated MessageStream.
 func (a *API) UpdateMessageStream(id string, req *UpdateMessageStreamReq) (*MessageStream, error) {
-	httpReq, err := a.newServerRequest(http.MethodPut, fmt.Sprintf("message-streams/%s", id), req)
+	httpReq, err := a.newServerRequest(http.MethodPut, fmt.Sprintf("message-streams/%s", url.PathEscape(id)), req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStream
@@ -160,13 +160,13 @@ func (a *API) UpdateMessageStream(id string, req *UpdateMessageStreamReq) (*Mess
 // ArchiveMessageStream archives the Message Stream identified by id.
 // It returns an ArchiveMessageStreamResp containing the outcome from the API.
 func (a *API) ArchiveMessageStream(id string) (*ArchiveMessageStreamResp, error) {
-	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", id), nil)
+	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ArchiveMessageStreamResp
@@ -179,13 +179,13 @@ func (a *API) ArchiveMessageStream(id string) (*ArchiveMessageStreamResp, error)
 // UnarchiveMessageStream unarchives the Message Stream identified by id.
 // It returns the updated MessageStream on success.
 func (a *API) UnarchiveMessageStream(id string) (*MessageStream, error) {
-	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", id), nil)
+	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStream
