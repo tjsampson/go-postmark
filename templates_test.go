@@ -1,7 +1,9 @@
 package postmark
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,7 +21,7 @@ func TestListTemplates_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -106,7 +108,7 @@ func TestCreateTemplate_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -167,7 +169,7 @@ func TestGetTemplate_ByID_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -247,7 +249,7 @@ func TestUpdateTemplate_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPut {
 				t.Errorf("expected PUT, got %s", req.Method)
@@ -297,7 +299,7 @@ func TestDeleteTemplate_Success(t *testing.T) {
 	want := DeleteResp{Message: "Template removed."}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodDelete {
 				t.Errorf("expected DELETE, got %s", req.Method)
@@ -376,7 +378,7 @@ func TestSendEmailWithTemplate_ByID_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -460,21 +462,142 @@ func TestSendEmailWithTemplate_APIError(t *testing.T) {
 	}
 }
 
+// TestSendEmailWithTemplate_TrackOpensFalse verifies that explicitly setting
+// TrackOpens to false serialises the field into the JSON request body rather
+// than omitting it. This is important because omitting the field causes Postmark
+// to apply its server-side default instead of honouring the caller's intent.
+func TestSendEmailWithTemplate_TrackOpensFalse(t *testing.T) {
+	trackOpens := false
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		// Read and decode the request body to verify TrackOpens is present.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var decoded map[string]interface{}
+		if err = json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		val, ok := decoded["TrackOpens"]
+		if !ok {
+			t.Error("TrackOpens key must be present in request body when set to false; got omitted")
+		} else if val != false {
+			t.Errorf("TrackOpens = %v, want false", val)
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, SendEmailResp{}),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]interface{}{},
+		From:          "sender@example.com",
+		To:            "recipient@example.com",
+		TrackOpens:    &trackOpens,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendEmailWithTemplate_TrackOpensTrue verifies that setting TrackOpens to
+// true also serialises the field correctly.
+func TestSendEmailWithTemplate_TrackOpensTrue(t *testing.T) {
+	trackOpens := true
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var decoded map[string]interface{}
+		if err = json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		val, ok := decoded["TrackOpens"]
+		if !ok {
+			t.Error("TrackOpens key must be present in request body when set to true")
+		} else if val != true {
+			t.Errorf("TrackOpens = %v, want true", val)
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, SendEmailResp{}),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]interface{}{},
+		From:          "sender@example.com",
+		To:            "recipient@example.com",
+		TrackOpens:    &trackOpens,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendEmailWithTemplate_TrackOpensNil verifies that leaving TrackOpens as
+// nil omits the field entirely, deferring to the Postmark server default.
+func TestSendEmailWithTemplate_TrackOpensNil(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var decoded map[string]interface{}
+		if err = json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		if _, ok := decoded["TrackOpens"]; ok {
+			t.Error("TrackOpens key must be absent in request body when TrackOpens is nil")
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, SendEmailResp{}),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]interface{}{},
+		From:          "sender@example.com",
+		To:            "recipient@example.com",
+		// TrackOpens deliberately omitted (nil)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // ---- SendEmailBatchWithTemplates -----------------------------------------------
 
 func TestSendEmailBatchWithTemplates_Success(t *testing.T) {
-	wantResponses := []SendEmailResp{
+	wantMessages := []SendEmailResp{
 		{To: "alice@example.com", MessageID: "msg-001", Message: "OK"},
 		{To: "bob@example.com", MessageID: "msg-002", Message: "OK"},
 	}
 	wantWrapper := batchWithTemplatesResp{
-		TotalSent:   2,
-		TotalFailed: 0,
-		Responses:   wantResponses,
+		totalSent:   2,
+		totalFailed: 0,
+		messages:    wantMessages,
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -549,9 +672,9 @@ func TestSendEmailBatchWithTemplates_APIError(t *testing.T) {
 
 func TestSendEmailBatchWithTemplates_EmptyBatch(t *testing.T) {
 	wantWrapper := batchWithTemplatesResp{
-		TotalSent:   0,
-		TotalFailed: 0,
-		Responses:   []SendEmailResp{},
+		totalSent:   0,
+		totalFailed: 0,
+		messages:    []SendEmailResp{},
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -575,7 +698,8 @@ func TestSendEmailBatchWithTemplates_EmptyBatch(t *testing.T) {
 // ---- Header verification -------------------------------------------------------
 
 // TestTemplates_UsesServerTokenHeader verifies that all template methods set
-// the X-Postmark-Server-Token header and NOT the X-Postmark-Account-Token header.
+// the X-Postmark-Server-Token header (from the dedicated serverToken field) and
+// NOT the X-Postmark-Account-Token header.
 func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	const serverToken = "server-tok-xyz"
 
@@ -590,7 +714,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	}
 
 	t.Run("ListTemplates", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, ListTemplatesResp{})}, nil
 		})))
@@ -598,7 +722,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("CreateTemplate", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, TemplateResp{})}, nil
 		})))
@@ -606,7 +730,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("GetTemplate", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, TemplateResp{})}, nil
 		})))
@@ -614,7 +738,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("UpdateTemplate", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, TemplateResp{})}, nil
 		})))
@@ -622,7 +746,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("DeleteTemplate", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, DeleteResp{})}, nil
 		})))
@@ -630,7 +754,7 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("SendEmailWithTemplate", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, SendEmailResp{})}, nil
 		})))
@@ -638,10 +762,33 @@ func TestTemplates_UsesServerTokenHeader(t *testing.T) {
 	})
 
 	t.Run("SendEmailBatchWithTemplates", func(t *testing.T) {
-		api := New(APITokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(serverToken), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
-			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, batchWithTemplatesResp{Responses: []SendEmailResp{}})}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, batchWithTemplatesResp{messages: []SendEmailResp{}})}, nil
 		})))
 		api.SendEmailBatchWithTemplates(&BatchWithTemplatesReq{Messages: []SendWithTemplateReq{}}) //nolint:errcheck
 	})
+}
+
+// ---- URL encoding --------------------------------------------------------------
+
+// TestGetTemplate_PathEscaping verifies that special characters in idOrAlias
+// are properly URL-encoded so that template aliases containing '/', '?', or '#'
+// do not corrupt the request path.
+func TestGetTemplate_PathEscaping(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		// url.PathEscape encodes '/' as '%2F'; the raw path must not contain a literal '/'.
+		if strings.Contains(req.URL.RawPath, "//") {
+			t.Errorf("unescaped slash in path: %s", req.URL.RawPath)
+		}
+		if !strings.Contains(req.URL.EscapedPath(), "slash%2Falias") {
+			t.Errorf("expected 'slash%%2Falias' in escaped path, got %s", req.URL.EscapedPath())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, TemplateResp{}),
+		}, nil
+	})))
+
+	api.GetTemplate("slash/alias") //nolint:errcheck
 }

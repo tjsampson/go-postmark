@@ -23,11 +23,12 @@ type (
 	// API is the main client for the Postmark API.
 	// Create one with New() and supply functional options to configure it.
 	API struct {
-		client     Doer
-		timeout    time.Duration
-		baseHost   string
-		token      string
-		timeoutSet bool // true when TimeoutOpt was explicitly supplied
+		client      Doer
+		timeout     time.Duration
+		baseHost    string
+		token       string // account-level token → X-Postmark-Account-Token
+		serverToken string // server-level token  → X-Postmark-Server-Token
+		timeoutSet  bool   // true when TimeoutOpt was explicitly supplied
 	}
 
 	// Req holds the URI and optional JSON body string for an outgoing request.
@@ -50,15 +51,16 @@ var (
 )
 
 // New creates and returns a new Postmark API client.
-// By default it reads the API token from the POSTMARK_API_TOKEN environment
-// variable and uses a 10-second timeout. Pass Option values to override
-// any of those defaults.
+// By default it reads the account API token from the POSTMARK_API_TOKEN
+// environment variable and the server token from POSTMARK_SERVER_TOKEN.
+// It uses a 10-second timeout. Pass Option values to override any defaults.
 func New(options ...Option) *API {
 	api := &API{
-		baseHost: "https://api.postmarkapp.com",
-		token:    os.Getenv("POSTMARK_API_TOKEN"),
-		timeout:  defaultTimeOut,
-		client:   &http.Client{Timeout: defaultTimeOut},
+		baseHost:    "https://api.postmarkapp.com",
+		token:       os.Getenv("POSTMARK_API_TOKEN"),
+		serverToken: os.Getenv("POSTMARK_SERVER_TOKEN"),
+		timeout:     defaultTimeOut,
+		client:      &http.Client{Timeout: defaultTimeOut},
 	}
 
 	// Apply Dynamic Caller Opts
