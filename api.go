@@ -71,26 +71,32 @@ func New(options ...Option) *API {
 }
 
 // newRequest builds an *http.Request for the given HTTP method and API path.
-// If body is non-nil it is JSON-encoded as the request body.
+// If body is non-nil it is JSON-encoded as the request body and Content-Type
+// is set to application/json. If body is nil, http.NoBody is used and no
+// Content-Type header is set.
 func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
-	var reqPayload []byte
-	if body != nil {
-		var err error
-		reqPayload, err = json.Marshal(body)
+	var reqBody io.Reader = http.NoBody
+	hasBody := body != nil
+	if hasBody {
+		reqPayload, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
+		reqBody = bytes.NewReader(reqPayload)
 	}
+
 	req, err := http.NewRequest(
 		method,
 		fmt.Sprintf("%s/%s", a.baseHost, path),
-		bytes.NewReader(reqPayload))
+		reqBody)
 
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
+	if hasBody {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("X-Postmark-Account-Token", a.token)
 
 	return req, nil
