@@ -3,6 +3,7 @@ package postmark
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -239,10 +240,33 @@ func TestSendEmailBatchWithTemplates_APIError(t *testing.T) {
 	}
 }
 
+// TestSendEmailBatchWithTemplates_TransportError verifies that a transport-level
+// error (e.g. network failure) is propagated as a Go error by SendEmailBatchWithTemplates.
+func TestSendEmailBatchWithTemplates_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.SendEmailBatchWithTemplates(&BatchWithTemplatesReq{
+		Messages: []SendEmailWithTemplateReq{
+			{TemplateID: 1, From: "sender@example.com", To: "a@example.com"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
+	}
+	if !errors.Is(err, transportErr) {
+		t.Errorf("expected errors.Is(err, transportErr), got err=%v", err)
+	}
+}
+
 // TestSendEmailBatchWithTemplates_PerMessageErrorCodes verifies that per-message
 // error codes are preserved in the returned BatchEmailResp. The caller is
 // responsible for inspecting each element's ErrorCode; the method itself does
-// not surface per-message failures as a Go error.
+// not surface per-message failures as a Go error because a batch can partially
+// succeed — returning a top-level error would discard successfully sent messages.
 func TestSendEmailBatchWithTemplates_PerMessageErrorCodes(t *testing.T) {
 	envelope := batchWithTemplatesResp{Messages: []EmailResp{
 		{To: "ok@example.com", MessageID: "m1", ErrorCode: 0, Message: "OK"},
@@ -359,7 +383,8 @@ func TestGetTemplate_NotFound(t *testing.T) {
 // TestGetTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
 // but with a non-zero ErrorCode in the body, GetTemplate surfaces it as a Go error.
 func TestGetTemplate_InBodyErrorCode(t *testing.T) {
-	body := TemplateResp{
+	// The envelope only has ErrorCode/Message — TemplateResp fields are zero.
+	body := templateRespEnvelope{
 		ErrorCode: 1101,
 		Message:   "Template not found",
 	}
@@ -476,7 +501,7 @@ func TestCreateTemplate_APIError(t *testing.T) {
 // TestCreateTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
 // but with a non-zero ErrorCode in the body, CreateTemplate surfaces it as a Go error.
 func TestCreateTemplate_InBodyErrorCode(t *testing.T) {
-	body := TemplateResp{
+	body := templateRespEnvelope{
 		ErrorCode: 1105,
 		Message:   "Template alias already in use",
 	}
@@ -574,7 +599,7 @@ func TestUpdateTemplate_APIError(t *testing.T) {
 // TestUpdateTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
 // but with a non-zero ErrorCode in the body, UpdateTemplate surfaces it as a Go error.
 func TestUpdateTemplate_InBodyErrorCode(t *testing.T) {
-	body := TemplateResp{
+	body := templateRespEnvelope{
 		ErrorCode: 1101,
 		Message:   "Template not found",
 	}
@@ -662,6 +687,36 @@ func TestListTemplates_APIError(t *testing.T) {
 	}
 }
 
+// TestListTemplates_InBodyAPIError verifies that when Postmark returns HTTP 200
+// but with a non-zero ErrorCode in the body (e.g. {"ErrorCode":401,"Message":"Unauthorized"}),
+// ListTemplates surfaces it as a Go error rather than silently returning a zero-valued struct.
+func TestListTemplates_InBodyAPIError(t *testing.T) {
+	// Simulate Postmark returning an auth error inside a 200 response.
+	body := ListTemplatesResp{
+		ErrorCode: 401,
+		Message:   "Unauthorized",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.ListTemplates(10, 0)
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 401 {
+		t.Errorf("ErrorCode = %d, want 401", pmErr.ErrorCode)
+	}
+}
+
 func TestListTemplates_Pagination(t *testing.T) {
 	want := ListTemplatesResp{
 		TotalCount: 100,
@@ -711,6 +766,9 @@ func TestDeleteTemplate_Success(t *testing.T) {
 	got, err := api.DeleteTemplate("99")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil DeleteTemplateResp, got nil")
 	}
 	if got.Message != "Template removed." {
 		t.Errorf("Message = %q, want Template removed.", got.Message)

@@ -34,6 +34,9 @@ type (
 		Tag           string        `json:"Tag,omitempty"`
 		// TrackOpens uses *bool so that an explicit false is serialised correctly.
 		// omitempty on a plain bool would silently drop false.
+		// TrackLinks is a string enum ("None", "HtmlAndText", etc.); an unset
+		// (empty) string sends an empty value to the API. Use omitempty or set
+		// it explicitly to avoid this if the API rejects an empty TrackLinks.
 		TrackOpens    *bool        `json:"TrackOpens,omitempty"`
 		TrackLinks    string       `json:"TrackLinks,omitempty"`
 		MessageStream string       `json:"MessageStream,omitempty"`
@@ -51,8 +54,21 @@ type (
 	// batchWithTemplatesResp is the internal response envelope for the
 	// POST /email/batchWithTemplates endpoint. Postmark returns
 	// {"Messages":[...]} rather than a bare JSON array.
+	// Messages uses BatchEmailResp (which is []EmailResp) so the inner slice
+	// can be returned directly without a type conversion.
 	batchWithTemplatesResp struct {
-		Messages []EmailResp `json:"Messages"`
+		Messages BatchEmailResp `json:"Messages"`
+	}
+
+	// templateRespEnvelope is an internal type used to unmarshal a Postmark API
+	// response that may contain either a successful TemplateResp payload or an
+	// error envelope ({"ErrorCode":N,"Message":"..."}). Separating the error
+	// fields from TemplateResp keeps the public type clean and avoids exposing
+	// zero-value noise fields to callers on success.
+	templateRespEnvelope struct {
+		TemplateResp
+		ErrorCode int    `json:"ErrorCode"`
+		Message   string `json:"Message"`
 	}
 
 	// TemplateResp represents a Postmark template as returned by the API.
@@ -67,14 +83,16 @@ type (
 		LayoutTemplate     string `json:"LayoutTemplate"`
 		AssociatedServerId int    `json:"AssociatedServerId"`
 		Active             bool   `json:"Active"`
-		ErrorCode          int    `json:"ErrorCode"`
-		Message            string `json:"Message"`
 	}
 
 	// ListTemplatesResp is the response envelope returned by the list-templates endpoint.
 	ListTemplatesResp struct {
 		TotalCount int            `json:"TotalCount"`
 		Templates  []TemplateResp `json:"Templates"`
+		// ErrorCode and Message are populated when Postmark returns an application-level
+		// error inside a 200 response (e.g. {"ErrorCode":401,"Message":"Unauthorized"}).
+		ErrorCode int    `json:"ErrorCode"`
+		Message   string `json:"Message"`
 	}
 
 	// CreateTemplateReq is the request body for creating a new Postmark template.
@@ -106,6 +124,21 @@ type (
 	}
 )
 
+// unmarshalTemplateResp is a helper that unmarshals raw bytes into a
+// templateRespEnvelope, checks for an in-body API error, and returns the
+// embedded TemplateResp on success. This keeps the error-check logic in one
+// place for GetTemplate, CreateTemplate, and UpdateTemplate.
+func unmarshalTemplateResp(raw []byte) (*TemplateResp, error) {
+	var env templateRespEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if env.ErrorCode != 0 {
+		return nil, PostmarkErr{ErrorCode: env.ErrorCode, Message: env.Message}
+	}
+	return &env.TemplateResp, nil
+}
+
 // SendEmailWithTemplate sends a single email using a Postmark template.
 // Either TemplateID or TemplateAlias must be set in the request.
 func (a *API) SendEmailWithTemplate(req *SendEmailWithTemplateReq) (*EmailResp, error) {
@@ -131,9 +164,14 @@ func (a *API) SendEmailWithTemplate(req *SendEmailWithTemplateReq) (*EmailResp, 
 // SendEmailBatchWithTemplates sends a batch of emails using Postmark templates.
 // Each message in the batch may reference its own template.
 // The Postmark API returns {"Messages":[...]} which is unwrapped before returning.
-// Note: Postmark reports per-message delivery failures via the ErrorCode field on
-// each EmailResp element rather than as a top-level error. Callers must inspect
-// each element's ErrorCode to detect individual message failures.
+//
+// Postmark reports per-message delivery failures via the ErrorCode field on each
+// EmailResp element rather than as a top-level HTTP or API error. This is an
+// intentional design of the Postmark batch API: a batch request can partially
+// succeed, so a single top-level error would not accurately represent the result.
+// Callers must therefore inspect each element's ErrorCode to detect individual
+// message failures; a non-zero ErrorCode on any element indicates that message
+// was not delivered.
 func (a *API) SendEmailBatchWithTemplates(req *BatchWithTemplatesReq) (BatchEmailResp, error) {
 	httpReq, err := a.newRequest(http.MethodPost, "email/batchWithTemplates", req)
 	if err != nil {
@@ -150,7 +188,7 @@ func (a *API) SendEmailBatchWithTemplates(req *BatchWithTemplatesReq) (BatchEmai
 	if err = json.Unmarshal(resp.rawBody, &envelope); err != nil {
 		return nil, err
 	}
-	return BatchEmailResp(envelope.Messages), nil
+	return envelope.Messages, nil
 }
 
 // GetTemplate fetches the Postmark template identified by templateIDOrAlias.
@@ -168,15 +206,7 @@ func (a *API) GetTemplate(templateIDOrAlias string) (*TemplateResp, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var data TemplateResp
-	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
-		return nil, err
-	}
-	if data.ErrorCode != 0 {
-		return nil, PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
-	}
-	return &data, nil
+	return unmarshalTemplateResp(resp.rawBody)
 }
 
 // CreateTemplate creates a new Postmark template with the settings in req.
@@ -190,15 +220,7 @@ func (a *API) CreateTemplate(req *CreateTemplateReq) (*TemplateResp, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var data TemplateResp
-	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
-		return nil, err
-	}
-	if data.ErrorCode != 0 {
-		return nil, PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
-	}
-	return &data, nil
+	return unmarshalTemplateResp(resp.rawBody)
 }
 
 // UpdateTemplate applies the changes in req to the Postmark template identified
@@ -216,15 +238,7 @@ func (a *API) UpdateTemplate(templateIDOrAlias string, req *UpdateTemplateReq) (
 	if err != nil {
 		return nil, err
 	}
-
-	var data TemplateResp
-	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
-		return nil, err
-	}
-	if data.ErrorCode != 0 {
-		return nil, PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
-	}
-	return &data, nil
+	return unmarshalTemplateResp(resp.rawBody)
 }
 
 // ListTemplates returns a paginated list of all Postmark templates on the server.
@@ -249,6 +263,9 @@ func (a *API) ListTemplates(count, offset int) (*ListTemplatesResp, error) {
 	var data ListTemplatesResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
+	}
+	if data.ErrorCode != 0 {
+		return nil, PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
 	}
 	return &data, nil
 }
