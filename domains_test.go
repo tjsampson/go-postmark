@@ -3,6 +3,7 @@ package postmark
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -51,28 +52,6 @@ func TestListDomains_Success(t *testing.T) {
 	}
 }
 
-// TestListDomains_ZeroOffsetAndCount verifies that zero values for count and
-// offset are serialised as "0" in the query string (boundary / pagination edge
-// case).
-func TestListDomains_ZeroOffsetAndCount(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.RawQuery, "count=0") {
-			t.Errorf("expected count=0 in query, got %s", req.URL.RawQuery)
-		}
-		if !strings.Contains(req.URL.RawQuery, "offset=0") {
-			t.Errorf("expected offset=0 in query, got %s", req.URL.RawQuery)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, ListDomainsResp{}),
-		}, nil
-	})))
-
-	if _, err := api.ListDomains(0, 0); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestListDomains_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -86,6 +65,23 @@ func TestListDomains_APIError(t *testing.T) {
 	_, err := api.ListDomains(10, 0)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected errors.As(err, &PostmarkErr) to be true, got err=%v", err)
+	}
+}
+
+func TestListDomains_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.ListDomains(10, 0)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -142,6 +138,19 @@ func TestGetDomain_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestGetDomain_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.GetDomain(42)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -259,6 +268,23 @@ func TestCreateDomain_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected errors.As(err, &PostmarkErr) to be true, got err=%v", err)
+	}
+}
+
+func TestCreateDomain_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.CreateDomain(&CreateDomainReq{Name: "new.com"})
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
+	}
 }
 
 // ---- UpdateDomain --------------------------------------------------------------
@@ -300,8 +326,9 @@ func TestUpdateDomain_Success(t *testing.T) {
 	}
 }
 
-// TestUpdateDomain_EmptyReq verifies that calling UpdateDomain with an empty
-// UpdateDomainReq returns an error immediately rather than silently sending {}.
+// TestUpdateDomain_EmptyReq verifies that calling UpdateDomain with a
+// zero-value UpdateDomainReq returns an error immediately rather than
+// silently sending an empty JSON object.
 func TestUpdateDomain_EmptyReq(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		t.Error("HTTP request should not be made for an empty UpdateDomainReq")
@@ -328,6 +355,19 @@ func TestUpdateDomain_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestUpdateDomain_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.UpdateDomain(7, &UpdateDomainReq{ReturnPathDomain: "bounces.example.com"})
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -372,6 +412,19 @@ func TestDeleteDomain_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestDeleteDomain_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.DeleteDomain(99)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -423,6 +476,19 @@ func TestVerifyDomainDkim_NotFound(t *testing.T) {
 	}
 }
 
+func TestVerifyDomainDkim_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.VerifyDomainDkim(42)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
+	}
+}
+
 // ---- VerifyDomainReturnPath ----------------------------------------------------
 
 func TestVerifyDomainReturnPath_Success(t *testing.T) {
@@ -468,6 +534,19 @@ func TestVerifyDomainReturnPath_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestVerifyDomainReturnPath_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.VerifyDomainReturnPath(42)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -519,6 +598,19 @@ func TestVerifyDomainSPF_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestVerifyDomainSPF_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.VerifyDomainSPF(42)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 
@@ -574,6 +666,19 @@ func TestRotateDomainDKIM_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestRotateDomainDKIM_TransportError(t *testing.T) {
+	transportErr := fmt.Errorf("dial tcp: connection refused")
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})))
+
+	_, err := api.RotateDomainDKIM(42)
+	if err == nil {
+		t.Fatal("expected a transport error, got nil")
 	}
 }
 

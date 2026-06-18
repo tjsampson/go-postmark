@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 )
 
@@ -36,10 +37,9 @@ type (
 	}
 
 	// UpdateDomainReq is the request body for updating an existing Postmark Domain.
-	// All fields are optional; omitempty means a zero-value ReturnPathDomain is
-	// omitted from the JSON body, resulting in a no-op PUT.  Callers should
-	// ensure at least one field is non-empty before calling UpdateDomain, which
-	// will return an error if the struct is empty.
+	// All fields are optional; fields left at their zero value are omitted from
+	// the JSON body via omitempty.  Callers must set at least one field;
+	// UpdateDomain returns an error if the struct equals its zero value.
 	UpdateDomainReq struct {
 		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
 	}
@@ -53,6 +53,7 @@ type (
 
 // ListDomains returns a paginated list of all Postmark Domains on the account.
 // count controls the page size and offset controls the starting position.
+// count must be at least 1; the Postmark API rejects count=0.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
 	req, err := a.newRequest(http.MethodGet, "domains", nil)
 	if err != nil {
@@ -114,10 +115,10 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 
 // UpdateDomain applies the changes in req to the Postmark Domain identified
 // by domainID and returns the updated DomainResp.
-// It returns an error immediately if req contains no fields to update, since
-// submitting an empty JSON object is a silent no-op.
+// It returns an error immediately if req is entirely zero-valued, since
+// submitting an empty JSON object would be a silent no-op.
 func (a *API) UpdateDomain(domainID int, req *UpdateDomainReq) (*DomainResp, error) {
-	if req.ReturnPathDomain == "" {
+	if reflect.DeepEqual(req, &UpdateDomainReq{}) {
 		return nil, fmt.Errorf("postmark: UpdateDomainReq has no fields to update")
 	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d", domainID), req)
@@ -195,7 +196,9 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 
 // VerifyDomainSPF triggers SPF verification for the Postmark Domain
 // identified by domainID.  An empty JSON object body is sent so that
-// Content-Type: application/json is set on the POST request.
+// Content-Type: application/json is set on the POST request, as required by
+// the Postmark API for POST endpoints (see newRequest: Content-Type is only
+// set when body != nil).
 func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), struct{}{})
 	if err != nil {
@@ -215,7 +218,9 @@ func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
 
 // RotateDomainDKIM initiates a DKIM key rotation for the Postmark Domain
 // identified by domainID.  An empty JSON object body is sent so that
-// Content-Type: application/json is set on the POST request.
+// Content-Type: application/json is set on the POST request, as required by
+// the Postmark API for POST endpoints (see newRequest: Content-Type is only
+// set when body != nil).
 func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotatedkim", domainID), struct{}{})
 	if err != nil {
