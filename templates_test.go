@@ -1,7 +1,10 @@
 package postmark
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -53,6 +56,8 @@ func TestSendEmailWithTemplate_WithAlias(t *testing.T) {
 		Message:   "OK",
 	}
 
+	trackOpens := true
+	inlineCss := true
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", req.Method)
@@ -66,10 +71,11 @@ func TestSendEmailWithTemplate_WithAlias(t *testing.T) {
 	got, err := api.SendEmailWithTemplate(&SendWithTemplateReq{
 		TemplateAlias: "welcome-email",
 		TemplateModel: map[string]interface{}{"user": "Alice"},
-		InlineCss:     true,
+		InlineCss:     &inlineCss,
 		From:          "sender@example.com",
 		To:            "recipient@example.com",
 		Tag:           "onboarding",
+		TrackOpens:    &trackOpens,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,6 +135,127 @@ func TestSendEmailWithTemplate_PostmarkErrorCode(t *testing.T) {
 	}
 	if pmErr.ErrorCode != 406 {
 		t.Errorf("ErrorCode = %d, want 406", pmErr.ErrorCode)
+	}
+}
+
+// TestSendEmailWithTemplate_NilReq verifies that passing a nil request is
+// rejected locally before any HTTP request is attempted.
+func TestSendEmailWithTemplate_NilReq(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for nil req")
+		return nil, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(nil)
+	if err == nil {
+		t.Fatal("expected an error for nil req, got nil")
+	}
+}
+
+// TestSendWithTemplateReq_TrackOpensFalse verifies that TrackOpens=false is
+// serialised to JSON (i.e. the *bool pointer form is used, not the bare bool
+// with omitempty which would silently drop the false value).
+func TestSendWithTemplateReq_TrackOpensFalse(t *testing.T) {
+	f := false
+	req := &SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]string{},
+		From:          "a@b.com",
+		To:            "c@d.com",
+		TrackOpens:    &f,
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err = json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	v, ok := m["TrackOpens"]
+	if !ok {
+		t.Fatal("TrackOpens key missing from JSON; false should be serialised when *bool pointer is set")
+	}
+	if v.(bool) != false {
+		t.Errorf("TrackOpens = %v, want false", v)
+	}
+}
+
+// TestSendWithTemplateReq_TrackOpensNilOmitted verifies that a nil TrackOpens
+// pointer is omitted from the JSON output (server uses its default).
+func TestSendWithTemplateReq_TrackOpensNilOmitted(t *testing.T) {
+	req := &SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]string{},
+		From:          "a@b.com",
+		To:            "c@d.com",
+		TrackOpens:    nil,
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if bytes.Contains(b, []byte("TrackOpens")) {
+		t.Errorf("TrackOpens should be absent from JSON when nil, got: %s", b)
+	}
+}
+
+// TestSendWithTemplateReq_InlineCssFalse verifies that InlineCss=false is
+// serialised to JSON when explicitly set via a *bool pointer.
+func TestSendWithTemplateReq_InlineCssFalse(t *testing.T) {
+	f := false
+	req := &SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]string{},
+		From:          "a@b.com",
+		To:            "c@d.com",
+		InlineCss:     &f,
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err = json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	v, ok := m["InlineCss"]
+	if !ok {
+		t.Fatal("InlineCss key missing from JSON; false should be serialised when *bool pointer is set")
+	}
+	if v.(bool) != false {
+		t.Errorf("InlineCss = %v, want false", v)
+	}
+}
+
+// TestSendWithTemplateReq_MetadataTyped verifies that Metadata is typed as
+// map[string]string, preventing incompatible types from being passed.
+func TestSendWithTemplateReq_MetadataTyped(t *testing.T) {
+	req := &SendWithTemplateReq{
+		TemplateID:    1,
+		TemplateModel: map[string]string{},
+		From:          "a@b.com",
+		To:            "c@d.com",
+		Metadata:      map[string]string{"campaign": "spring-sale", "source": "email"},
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err = json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	meta, ok := m["Metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Metadata type = %T, want map[string]interface{}", m["Metadata"])
+	}
+	if meta["campaign"] != "spring-sale" {
+		t.Errorf("Metadata[campaign] = %v, want spring-sale", meta["campaign"])
 	}
 }
 
@@ -293,6 +420,20 @@ func TestCreateTemplate_APIError(t *testing.T) {
 	}
 }
 
+// TestCreateTemplate_NilReq verifies that passing a nil request is rejected
+// locally before any HTTP request is attempted.
+func TestCreateTemplate_NilReq(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for nil req")
+		return nil, nil
+	})))
+
+	_, err := api.CreateTemplate(nil)
+	if err == nil {
+		t.Fatal("expected an error for nil req, got nil")
+	}
+}
+
 // ---- EditTemplate --------------------------------------------------------------
 
 func TestEditTemplate_Success(t *testing.T) {
@@ -380,7 +521,7 @@ func TestListTemplates_Success(t *testing.T) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
-		if !strings.Contains(req.URL.Path, "/templates") {
+		if !strings.HasSuffix(req.URL.Path, "/templates") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
 		if req.URL.Query().Get("count") != "10" {
@@ -432,6 +573,37 @@ func TestListTemplates_WithOffset(t *testing.T) {
 	}
 	if got.TotalCount != 10 {
 		t.Errorf("TotalCount = %d, want 10", got.TotalCount)
+	}
+}
+
+// TestListTemplates_QueryParamsMerged verifies that ListTemplates merges
+// count/offset into any pre-existing query parameters on the request URL
+// rather than overwriting the entire RawQuery. This guards against a future
+// change in newRequest that might add default query params.
+func TestListTemplates_QueryParamsMerged(t *testing.T) {
+	var capturedQuery string
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		capturedQuery = req.URL.RawQuery
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListTemplatesResp{TotalCount: 0}),
+		}, nil
+	})))
+
+	_, err := api.ListTemplates(20, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	q, err := parseQuery(capturedQuery)
+	if err != nil {
+		t.Fatalf("failed to parse captured query %q: %v", capturedQuery, err)
+	}
+	if q.Get("count") != "20" {
+		t.Errorf("count = %q, want 20 in query %q", q.Get("count"), capturedQuery)
+	}
+	if q.Get("offset") != "10" {
+		t.Errorf("offset = %q, want 10 in query %q", q.Get("offset"), capturedQuery)
 	}
 }
 
@@ -513,6 +685,7 @@ func TestValidateTemplate_Success(t *testing.T) {
 			ContentIsValid:  true,
 			RenderedContent: "Hello World",
 		},
+		SuggestedTemplateModel: map[string]interface{}{"name": "World"},
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -544,6 +717,13 @@ func TestValidateTemplate_Success(t *testing.T) {
 	}
 	if got.HtmlBody.RenderedContent != "<h1>Hello World</h1>" {
 		t.Errorf("HtmlBody.RenderedContent = %q", got.HtmlBody.RenderedContent)
+	}
+	// SuggestedTemplateModel should decode as map[string]interface{}
+	if got.SuggestedTemplateModel == nil {
+		t.Error("SuggestedTemplateModel should not be nil")
+	}
+	if got.SuggestedTemplateModel["name"] != "World" {
+		t.Errorf("SuggestedTemplateModel[name] = %v, want World", got.SuggestedTemplateModel["name"])
 	}
 }
 
@@ -678,3 +858,34 @@ func TestPushTemplate_APIError(t *testing.T) {
 		t.Fatal("expected an error, got nil")
 	}
 }
+
+// ---- helpers used only in templates_test.go -----------------------------------
+
+// parseQuery is a thin wrapper around url.ParseQuery used in this test file
+// to keep test helpers self-contained.
+func parseQuery(rawQuery string) (interface{ Get(string) string }, error) {
+	return parseRawQuery(rawQuery)
+}
+
+// parseRawQuery parses a raw query string and returns the url.Values.
+func parseRawQuery(rawQuery string) (urlValues, error) {
+	// Re-use io from the imports to avoid an extra import.
+	_ = io.Discard // keep io import used
+	vals := make(urlValues)
+	pairs := strings.Split(rawQuery, "&")
+	for _, pair := range pairs {
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 {
+			vals[kv[0]] = kv[1]
+		}
+	}
+	return vals, nil
+}
+
+// urlValues is a minimal map that satisfies the Get interface used in tests.
+type urlValues map[string]string
+
+func (v urlValues) Get(key string) string { return v[key] }
