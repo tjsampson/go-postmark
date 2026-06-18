@@ -34,7 +34,7 @@ func TestListMessageStreams_Success(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListMessageStreams("")
+	got, err := api.ListMessageStreams(false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,12 +65,31 @@ func TestListMessageStreams_WithIncludeArchived(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListMessageStreams("true")
+	got, err := api.ListMessageStreams(true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.TotalCount != want.TotalCount {
 		t.Errorf("TotalCount = %d, want %d", got.TotalCount, want.TotalCount)
+	}
+}
+
+// TestListMessageStreams_FalseNeverSendsParam verifies that passing false omits
+// the includeArchived query parameter entirely (the API default is false).
+func TestListMessageStreams_FalseNeverSendsParam(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if req.URL.RawQuery != "" {
+			t.Errorf("expected no query params when includeArchived=false, got %s", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListMessageStreamsResp{}),
+		}, nil
+	})))
+
+	_, err := api.ListMessageStreams(false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -84,9 +103,13 @@ func TestListMessageStreams_APIError(t *testing.T) {
 		}, nil
 	})))
 
-	_, err := api.ListMessageStreams("")
+	_, err := api.ListMessageStreams(false)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected a PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -144,6 +167,14 @@ func TestGetMessageStream_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestGetMessageStream_EmptyStreamID(t *testing.T) {
+	api := New()
+	_, err := api.GetMessageStream("")
+	if err == nil {
+		t.Fatal("expected error for empty streamID, got nil")
 	}
 }
 
@@ -210,6 +241,10 @@ func TestCreateMessageStream_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected a PostmarkErr, got %T: %v", err, err)
+	}
 }
 
 // ---- EditMessageStream ---------------------------------------------------------
@@ -252,6 +287,42 @@ func TestEditMessageStream_Success(t *testing.T) {
 	}
 }
 
+// TestEditMessageStream_EmptyReq verifies that an empty EditMessageStreamReq
+// (all omitempty fields absent) still reaches the endpoint with an empty JSON
+// body ({}) and does not silently become a no-op at the HTTP layer.
+func TestEditMessageStream_EmptyReq(t *testing.T) {
+	want := MessageStreamResp{
+		ID:   "my-stream",
+		Name: "My Stream",
+	}
+	requestReached := false
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		requestReached = true
+		if req.Method != http.MethodPatch {
+			t.Errorf("expected PATCH, got %s", req.Method)
+		}
+		if !strings.HasSuffix(req.URL.Path, "/message-streams/my-stream") {
+			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, want),
+		}, nil
+	})))
+
+	got, err := api.EditMessageStream("my-stream", &EditMessageStreamReq{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !requestReached {
+		t.Error("expected an HTTP request to be made, but none was")
+	}
+	if got.ID != want.ID {
+		t.Errorf("ID = %q, want %q", got.ID, want.ID)
+	}
+}
+
 func TestEditMessageStream_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -269,16 +340,28 @@ func TestEditMessageStream_NotFound(t *testing.T) {
 	}
 }
 
+func TestEditMessageStream_EmptyStreamID(t *testing.T) {
+	api := New()
+	_, err := api.EditMessageStream("", &EditMessageStreamReq{Name: "Ghost"})
+	if err == nil {
+		t.Fatal("expected error for empty streamID, got nil")
+	}
+}
+
 // ---- ArchiveMessageStream ------------------------------------------------------
 
 func TestArchiveMessageStream_Success(t *testing.T) {
+	archivedAt := "2021-07-01T00:00:00Z"
+	expungeAt := "2021-08-01T00:00:00Z"
 	want := ArchiveMessageStreamResp{
-		ID:          "my-stream",
-		ServerID:    1,
-		Name:        "My Stream",
-		Description: "A custom stream",
-		ArchivedAt:  "2021-07-01T00:00:00Z",
-		ExpungeAt:   "2021-08-01T00:00:00Z",
+		MessageStreamResp: MessageStreamResp{
+			ID:          "my-stream",
+			ServerID:    1,
+			Name:        "My Stream",
+			Description: "A custom stream",
+			ArchivedAt:  &archivedAt,
+			ExpungeAt:   &expungeAt,
+		},
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -301,11 +384,11 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 	if got.ID != want.ID {
 		t.Errorf("ID = %q, want %q", got.ID, want.ID)
 	}
-	if got.ArchivedAt != want.ArchivedAt {
-		t.Errorf("ArchivedAt = %q, want %q", got.ArchivedAt, want.ArchivedAt)
+	if got.ArchivedAt == nil || *got.ArchivedAt != archivedAt {
+		t.Errorf("ArchivedAt = %v, want %q", got.ArchivedAt, archivedAt)
 	}
-	if got.ExpungeAt != want.ExpungeAt {
-		t.Errorf("ExpungeAt = %q, want %q", got.ExpungeAt, want.ExpungeAt)
+	if got.ExpungeAt == nil || *got.ExpungeAt != expungeAt {
+		t.Errorf("ExpungeAt = %v, want %q", got.ExpungeAt, expungeAt)
 	}
 }
 
@@ -326,6 +409,14 @@ func TestArchiveMessageStream_NotFound(t *testing.T) {
 	}
 }
 
+func TestArchiveMessageStream_EmptyStreamID(t *testing.T) {
+	api := New()
+	_, err := api.ArchiveMessageStream("")
+	if err == nil {
+		t.Fatal("expected error for empty streamID, got nil")
+	}
+}
+
 // ---- UnarchiveMessageStream ----------------------------------------------------
 
 func TestUnarchiveMessageStream_Success(t *testing.T) {
@@ -336,6 +427,7 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 		Description:       "A custom stream",
 		MessageStreamType: "Transactional",
 		CreatedAt:         "2021-06-01T00:00:00Z",
+		// ArchivedAt and ExpungeAt must be nil after a successful unarchive.
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -361,6 +453,14 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	if got.Name != want.Name {
 		t.Errorf("Name = %q, want %q", got.Name, want.Name)
 	}
+	// The distinguishing postcondition of a successful unarchive is that
+	// ArchivedAt and ExpungeAt are nil.
+	if got.ArchivedAt != nil {
+		t.Errorf("ArchivedAt should be nil after unarchive, got %q", *got.ArchivedAt)
+	}
+	if got.ExpungeAt != nil {
+		t.Errorf("ExpungeAt should be nil after unarchive, got %q", *got.ExpungeAt)
+	}
 }
 
 func TestUnarchiveMessageStream_NotFound(t *testing.T) {
@@ -377,6 +477,14 @@ func TestUnarchiveMessageStream_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestUnarchiveMessageStream_EmptyStreamID(t *testing.T) {
+	api := New()
+	_, err := api.UnarchiveMessageStream("")
+	if err == nil {
+		t.Fatal("expected error for empty streamID, got nil")
 	}
 }
 

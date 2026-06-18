@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -48,25 +49,22 @@ type (
 	}
 
 	// ArchiveMessageStreamResp is the response returned when a message stream is archived.
+	// It embeds MessageStreamResp (which carries ArchivedAt and ExpungeAt as *string) and
+	// adds the optional API-level error fields that Postmark may include.
 	ArchiveMessageStreamResp struct {
-		ID          string  `json:"ID"`
-		ServerID    int     `json:"ServerID"`
-		Name        string  `json:"Name"`
-		Description string  `json:"Description"`
-		ArchivedAt  string  `json:"ArchivedAt"`
-		ExpungeAt   string  `json:"ExpungeAt"`
-		ErrorCode   *int    `json:"ErrorCode"`
-		Message     *string `json:"Message"`
+		MessageStreamResp
+		ErrorCode *int    `json:"ErrorCode"`
+		Message   *string `json:"Message"`
 	}
 )
 
 // ListMessageStreams returns a list of all Message Streams for the server.
-// Pass includeArchivedStr as "true" to include archived streams, or "" to omit the param.
-func (a *API) ListMessageStreams(includeArchivedStr string) (*ListMessageStreamsResp, error) {
+// Pass includeArchived as true to include archived streams in the results.
+func (a *API) ListMessageStreams(includeArchived bool) (*ListMessageStreamsResp, error) {
 	path := "message-streams"
-	if includeArchivedStr != "" {
+	if includeArchived {
 		params := url.Values{}
-		params.Set("includeArchived", includeArchivedStr)
+		params.Set("includeArchived", fmt.Sprintf("%t", includeArchived))
 		path = path + "?" + params.Encode()
 	}
 
@@ -75,9 +73,9 @@ func (a *API) ListMessageStreams(includeArchivedStr string) (*ListMessageStreams
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListMessageStreamsResp
@@ -89,14 +87,18 @@ func (a *API) ListMessageStreams(includeArchivedStr string) (*ListMessageStreams
 
 // GetMessageStream fetches the Message Stream identified by streamID.
 func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errors.New("streamID must not be empty")
+	}
+
 	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -114,9 +116,9 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -129,14 +131,18 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 // EditMessageStream applies the changes in req to the Message Stream identified
 // by streamID and returns the updated MessageStreamResp.
 func (a *API) EditMessageStream(streamID string, req *EditMessageStreamReq) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errors.New("streamID must not be empty")
+	}
+
 	httpReq, err := a.newRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", streamID), req)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -149,14 +155,18 @@ func (a *API) EditMessageStream(streamID string, req *EditMessageStreamReq) (*Me
 // ArchiveMessageStream archives the Message Stream identified by streamID.
 // Archived streams are scheduled for permanent deletion after a grace period.
 func (a *API) ArchiveMessageStream(streamID string) (*ArchiveMessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errors.New("streamID must not be empty")
+	}
+
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ArchiveMessageStreamResp
@@ -169,14 +179,18 @@ func (a *API) ArchiveMessageStream(streamID string) (*ArchiveMessageStreamResp, 
 // UnarchiveMessageStream restores a previously archived Message Stream identified
 // by streamID and returns the updated MessageStreamResp.
 func (a *API) UnarchiveMessageStream(streamID string) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errors.New("streamID must not be empty")
+	}
+
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
