@@ -173,6 +173,33 @@ func TestCreateServer_APIError(t *testing.T) {
 	}
 }
 
+// TestCreateServer_Conflict asserts that a 409 Conflict response causes
+// CreateServer to return ErrExists, detectable via errors.Is.
+func TestCreateServer_Conflict(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: http.StatusConflict, Message: "A server with this name already exists."}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", req.Method)
+		}
+		if !strings.HasSuffix(req.URL.Path, "/servers") {
+			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusConflict,
+			Body:       jsonBody(t, pmErr),
+		}, nil
+	})))
+
+	_, err := api.CreateServer(&CreateServerReq{Name: "Duplicate Server"})
+	if err == nil {
+		t.Fatal("expected ErrExists, got nil")
+	}
+	if !errors.Is(err, ErrExists) {
+		t.Errorf("expected errors.Is(err, ErrExists) to be true, got err=%v", err)
+	}
+}
+
 // ---- ReadServer ----------------------------------------------------------------
 
 func TestReadServer_Success(t *testing.T) {

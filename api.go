@@ -116,8 +116,11 @@ func (a *API) Do(req *http.Request) (*Resp, error) {
 }
 
 // readResponse reads the body from an *http.Response and returns a *Resp.
-// For non-2xx / non-404 status codes it attempts to unmarshal a PostmarkErr.
-// A 404 response returns ErrNotFound so callers can use errors.Is(err, ErrNotFound).
+// For non-2xx status codes it attempts to unmarshal a PostmarkErr and returns
+// the appropriate sentinel error so callers can use errors.Is:
+//   - A 404 response returns ErrNotFound.
+//   - A 409 response returns ErrExists.
+//   - Any other non-2xx response returns the unmarshalled PostmarkErr value.
 func readResponse(resp *http.Response) (*Resp, error) {
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
@@ -135,6 +138,10 @@ func readResponse(resp *http.Response) (*Resp, error) {
 	err = json.Unmarshal(respBody, &pmError)
 	if err != nil {
 		return newResponse(respBody, resp), errors.Wrap(err, "failed to unmarshal postmark err")
+	}
+
+	if pmError.ErrorCode == ErrExists.ErrorCode {
+		return newResponse(respBody, resp), ErrExists
 	}
 
 	return newResponse(respBody, resp), pmError
