@@ -113,6 +113,7 @@ func (a *API) Do(req *http.Request) (*Resp, error) {
 // readResponse reads the body from an *http.Response and returns a *Resp.
 // For non-2xx / non-404 status codes it attempts to unmarshal a PostmarkErr.
 func readResponse(resp *http.Response) (*Resp, error) {
+	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
