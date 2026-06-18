@@ -28,6 +28,9 @@ import (
 	"time"
 )
 
+// DefaultMaxRetries is the default maximum number of retry attempts for API requests.
+const DefaultMaxRetries = 7
+
 type (
 	// Doer is the interface satisfied by *http.Client and any custom HTTP transport.
 	// It allows callers to inject a mock client for testing.
