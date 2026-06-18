@@ -23,11 +23,12 @@ func APITokenOpt(token string) Option {
 }
 
 // TimeoutOpt returns an Option that overrides the default 10-second HTTP
-// request timeout on the underlying client. The timeout is reconciled with
-// the HTTP client in New() after all options have been applied, so option
-// order does not matter.
+// request timeout. The timeout is reconciled with the underlying *http.Client
+// (if any) in New() after all options have been applied, so option order does
+// not matter.
 func TimeoutOpt(timeout time.Duration) Option {
 	return func(api *API) {
 		api.timeout = timeout
+		api.timeoutSet = true
 	}
 }

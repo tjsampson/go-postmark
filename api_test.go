@@ -103,59 +103,73 @@ func TestTimeoutOpt_AppliedToClient(t *testing.T) {
 	}
 }
 
-// TestTimeoutOpt_OrderIndependent_TimeoutThenHTTPClient verifies that when
-// TimeoutOpt is applied before HTTPClientOpt, the injected client's Timeout
-// is reconciled to the value supplied by TimeoutOpt.
-func TestTimeoutOpt_OrderIndependent_TimeoutThenHTTPClient(t *testing.T) {
+// TestTimeoutOpt_OrderIndependent verifies that TimeoutOpt and HTTPClientOpt
+// produce a consistent result regardless of the order they are supplied to New.
+func TestTimeoutOpt_OrderIndependent(t *testing.T) {
 	const want = 7 * time.Second
-	injected := &http.Client{} // Timeout is zero initially
 
-	api := New(TimeoutOpt(want), HTTPClientOpt(injected))
-
-	// api.timeout must equal want
-	if api.timeout != want {
-		t.Errorf("api.timeout = %v, want %v", api.timeout, want)
+	tests := []struct {
+		name string
+		opts func(injected *http.Client) []Option
+	}{
+		{
+			name: "TimeoutOpt then HTTPClientOpt",
+			opts: func(injected *http.Client) []Option {
+				return []Option{TimeoutOpt(want), HTTPClientOpt(injected)}
+			},
+		},
+		{
+			name: "HTTPClientOpt then TimeoutOpt",
+			opts: func(injected *http.Client) []Option {
+				return []Option{HTTPClientOpt(injected), TimeoutOpt(want)}
+			},
+		},
 	}
 
-	// The injected client's Timeout must have been reconciled
-	hc, ok := api.client.(*http.Client)
-	if !ok {
-		t.Fatal("expected api.client to be *http.Client")
-	}
-	if hc.Timeout != want {
-		t.Errorf("injected client Timeout = %v, want %v", hc.Timeout, want)
-	}
-	// Both api.timeout and client.Timeout must be consistent
-	if api.timeout != hc.Timeout {
-		t.Errorf("api.timeout (%v) != client.Timeout (%v); options must be order-independent", api.timeout, hc.Timeout)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			injected := &http.Client{} // Timeout is zero initially
+			api := New(tc.opts(injected)...)
+
+			if api.timeout != want {
+				t.Errorf("api.timeout = %v, want %v", api.timeout, want)
+			}
+
+			hc, ok := api.client.(*http.Client)
+			if !ok {
+				t.Fatal("expected api.client to be *http.Client")
+			}
+			if hc.Timeout != want {
+				t.Errorf("injected client Timeout = %v, want %v", hc.Timeout, want)
+			}
+			if api.timeout != hc.Timeout {
+				t.Errorf("api.timeout (%v) != client.Timeout (%v); options must be order-independent", api.timeout, hc.Timeout)
+			}
+		})
 	}
 }
 
-// TestTimeoutOpt_OrderIndependent_HTTPClientThenTimeout verifies that when
-// HTTPClientOpt is applied before TimeoutOpt, the injected client's Timeout
-// is reconciled to the value supplied by TimeoutOpt.
-func TestTimeoutOpt_OrderIndependent_HTTPClientThenTimeout(t *testing.T) {
-	const want = 7 * time.Second
-	injected := &http.Client{} // Timeout is zero initially
+// TestHTTPClientOpt_PreservesCallerTimeout verifies that when a caller injects
+// an *http.Client with its own timeout and does NOT supply TimeoutOpt, the
+// reconciliation step in New() does not overwrite the caller's timeout.
+func TestHTTPClientOpt_PreservesCallerTimeout(t *testing.T) {
+	const callerTimeout = 30 * time.Second
+	injected := &http.Client{Timeout: callerTimeout}
 
-	api := New(HTTPClientOpt(injected), TimeoutOpt(want))
+	api := New(HTTPClientOpt(injected))
 
-	// api.timeout must equal want
-	if api.timeout != want {
-		t.Errorf("api.timeout = %v, want %v", api.timeout, want)
+	// api.timeout reflects the library default (no TimeoutOpt was given).
+	if api.timeout != defaultTimeOut {
+		t.Errorf("api.timeout = %v, want default %v", api.timeout, defaultTimeOut)
 	}
 
-	// The injected client's Timeout must have been reconciled
+	// The injected client's own timeout must be left intact.
 	hc, ok := api.client.(*http.Client)
 	if !ok {
 		t.Fatal("expected api.client to be *http.Client")
 	}
-	if hc.Timeout != want {
-		t.Errorf("injected client Timeout = %v, want %v", hc.Timeout, want)
-	}
-	// Both api.timeout and client.Timeout must be consistent
-	if api.timeout != hc.Timeout {
-		t.Errorf("api.timeout (%v) != client.Timeout (%v); options must be order-independent", api.timeout, hc.Timeout)
+	if hc.Timeout != callerTimeout {
+		t.Errorf("injected client Timeout = %v, want %v (caller's timeout must not be overwritten)", hc.Timeout, callerTimeout)
 	}
 }
 
