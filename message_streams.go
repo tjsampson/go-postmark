@@ -6,13 +6,28 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
+)
+
+// UnsubscribeHandlingType is the set of allowed values for
+// SubscriptionManagementConfiguration.UnsubscribeHandlingType.
+type UnsubscribeHandlingType string
+
+const (
+	// UnsubscribeHandlingNone means no unsubscribe handling is configured.
+	UnsubscribeHandlingNone UnsubscribeHandlingType = "None"
+	// UnsubscribeHandlingPostmarkManaged means Postmark handles unsubscribes.
+	UnsubscribeHandlingPostmarkManaged UnsubscribeHandlingType = "PostmarkManaged"
+	// UnsubscribeHandlingCustom means the caller handles unsubscribes.
+	UnsubscribeHandlingCustom UnsubscribeHandlingType = "Custom"
 )
 
 type (
 	// SubscriptionManagementConfiguration holds configuration for subscription
 	// management on a message stream.
 	SubscriptionManagementConfiguration struct {
-		UnsubscribeHandlingType string `json:"UnsubscribeHandlingType"`
+		UnsubscribeHandlingType UnsubscribeHandlingType `json:"UnsubscribeHandlingType"`
 	}
 
 	// MessageStreamResp represents a Postmark Message Stream as returned by the API.
@@ -22,9 +37,9 @@ type (
 		Name                                string                               `json:"Name"`
 		Description                         string                               `json:"Description"`
 		MessageStreamType                   string                               `json:"MessageStreamType"`
-		CreatedAt                           string                               `json:"CreatedAt"`
-		ArchivedAt                          *string                              `json:"ArchivedAt"`
-		ExpungeAt                           *string                              `json:"ExpungeAt"`
+		CreatedAt                           time.Time                            `json:"CreatedAt"`
+		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
+		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
 		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration"`
 	}
 
@@ -49,22 +64,31 @@ type (
 	}
 
 	// ArchiveMessageStreamResp is the response returned when a message stream is archived.
-	// It embeds MessageStreamResp (which carries ArchivedAt and ExpungeAt as *string) and
-	// adds the optional API-level error fields that Postmark may include.
+	// It is a flat struct that mirrors the fields Postmark returns from the archive endpoint:
+	// all stream fields plus an optional error envelope (ErrorCode, Message).
 	ArchiveMessageStreamResp struct {
-		MessageStreamResp
-		ErrorCode *int    `json:"ErrorCode"`
-		Message   *string `json:"Message"`
+		ID                                  string                               `json:"ID"`
+		ServerID                            int                                  `json:"ServerID"`
+		Name                                string                               `json:"Name"`
+		Description                         string                               `json:"Description"`
+		MessageStreamType                   string                               `json:"MessageStreamType"`
+		CreatedAt                           time.Time                            `json:"CreatedAt"`
+		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
+		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
+		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration"`
+		ErrorCode                           *int                                 `json:"ErrorCode"`
+		Message                             *string                              `json:"Message"`
 	}
 )
 
 // ListMessageStreams returns a list of all Message Streams for the server.
-// Pass includeArchived as true to include archived streams in the results.
-func (a *API) ListMessageStreams(includeArchived bool) (*ListMessageStreamsResp, error) {
+// Pass includeArchivedStr as "true" to include archived streams in the results;
+// any other value (including "") omits the query parameter and uses the API default (false).
+func (a *API) ListMessageStreams(includeArchivedStr string) (*ListMessageStreamsResp, error) {
 	path := "message-streams"
-	if includeArchived {
+	if includeArchivedStr == "true" {
 		params := url.Values{}
-		params.Set("includeArchived", fmt.Sprintf("%t", includeArchived))
+		params.Set("includeArchived", strconv.FormatBool(true))
 		path = path + "?" + params.Encode()
 	}
 
@@ -110,7 +134,21 @@ func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
 
 // CreateMessageStream creates a new Message Stream with the settings in req.
 // It returns the full MessageStreamResp on success.
+// ID, Name, and MessageStreamType are required fields and must not be empty.
 func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamResp, error) {
+	if req == nil {
+		return nil, errors.New("req must not be nil")
+	}
+	if req.ID == "" {
+		return nil, errors.New("req.ID must not be empty")
+	}
+	if req.Name == "" {
+		return nil, errors.New("req.Name must not be empty")
+	}
+	if req.MessageStreamType == "" {
+		return nil, errors.New("req.MessageStreamType must not be empty")
+	}
+
 	httpReq, err := a.newRequest(http.MethodPost, "message-streams", req)
 	if err != nil {
 		return nil, err

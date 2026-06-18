@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---- ListMessageStreams --------------------------------------------------------
@@ -34,7 +35,7 @@ func TestListMessageStreams_Success(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListMessageStreams(false)
+	got, err := api.ListMessageStreams("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestListMessageStreams_WithIncludeArchived(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListMessageStreams(true)
+	got, err := api.ListMessageStreams("true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,12 +75,12 @@ func TestListMessageStreams_WithIncludeArchived(t *testing.T) {
 	}
 }
 
-// TestListMessageStreams_FalseNeverSendsParam verifies that passing false omits
-// the includeArchived query parameter entirely (the API default is false).
+// TestListMessageStreams_FalseNeverSendsParam verifies that passing any value
+// other than "true" omits the includeArchived query parameter entirely (the API default is false).
 func TestListMessageStreams_FalseNeverSendsParam(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.URL.RawQuery != "" {
-			t.Errorf("expected no query params when includeArchived=false, got %s", req.URL.RawQuery)
+			t.Errorf("expected no query params when includeArchivedStr is not \"true\", got %s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -87,7 +88,7 @@ func TestListMessageStreams_FalseNeverSendsParam(t *testing.T) {
 		}, nil
 	})))
 
-	_, err := api.ListMessageStreams(false)
+	_, err := api.ListMessageStreams("false")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestListMessageStreams_APIError(t *testing.T) {
 		}, nil
 	})))
 
-	_, err := api.ListMessageStreams(false)
+	_, err := api.ListMessageStreams("")
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -116,13 +117,14 @@ func TestListMessageStreams_APIError(t *testing.T) {
 // ---- GetMessageStream ----------------------------------------------------------
 
 func TestGetMessageStream_Success(t *testing.T) {
+	createdAt := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
 	want := MessageStreamResp{
 		ID:                "outbound",
 		ServerID:          1,
 		Name:              "Outbound",
 		Description:       "Default transactional stream",
 		MessageStreamType: "Transactional",
-		CreatedAt:         "2021-01-01T00:00:00Z",
+		CreatedAt:         createdAt,
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -150,6 +152,9 @@ func TestGetMessageStream_Success(t *testing.T) {
 	}
 	if got.Name != want.Name {
 		t.Errorf("Name = %q, want %q", got.Name, want.Name)
+	}
+	if !got.CreatedAt.Equal(want.CreatedAt) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, want.CreatedAt)
 	}
 }
 
@@ -181,13 +186,14 @@ func TestGetMessageStream_EmptyStreamID(t *testing.T) {
 // ---- CreateMessageStream -------------------------------------------------------
 
 func TestCreateMessageStream_Success(t *testing.T) {
+	createdAt := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
 	want := MessageStreamResp{
 		ID:                "my-stream",
 		ServerID:          1,
 		Name:              "My Stream",
 		Description:       "A custom stream",
 		MessageStreamType: "Transactional",
-		CreatedAt:         "2021-06-01T00:00:00Z",
+		CreatedAt:         createdAt,
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -247,16 +253,51 @@ func TestCreateMessageStream_APIError(t *testing.T) {
 	}
 }
 
+// TestCreateMessageStream_NilReq verifies that a nil request returns an error
+// without making an HTTP call.
+func TestCreateMessageStream_NilReq(t *testing.T) {
+	api := New()
+	_, err := api.CreateMessageStream(nil)
+	if err == nil {
+		t.Fatal("expected error for nil req, got nil")
+	}
+}
+
+// TestCreateMessageStream_MissingRequiredFields verifies that empty required
+// fields are rejected before an HTTP call is made.
+func TestCreateMessageStream_MissingRequiredFields(t *testing.T) {
+	api := New()
+
+	tests := []struct {
+		name string
+		req  *CreateMessageStreamReq
+	}{
+		{"missing ID", &CreateMessageStreamReq{Name: "N", MessageStreamType: "Transactional"}},
+		{"missing Name", &CreateMessageStreamReq{ID: "id", MessageStreamType: "Transactional"}},
+		{"missing MessageStreamType", &CreateMessageStreamReq{ID: "id", Name: "N"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := api.CreateMessageStream(tc.req)
+			if err == nil {
+				t.Errorf("expected validation error for %q, got nil", tc.name)
+			}
+		})
+	}
+}
+
 // ---- EditMessageStream ---------------------------------------------------------
 
 func TestEditMessageStream_Success(t *testing.T) {
+	createdAt := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
 	want := MessageStreamResp{
 		ID:                "my-stream",
 		ServerID:          1,
 		Name:              "Renamed Stream",
 		Description:       "Updated description",
 		MessageStreamType: "Transactional",
-		CreatedAt:         "2021-06-01T00:00:00Z",
+		CreatedAt:         createdAt,
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -351,17 +392,15 @@ func TestEditMessageStream_EmptyStreamID(t *testing.T) {
 // ---- ArchiveMessageStream ------------------------------------------------------
 
 func TestArchiveMessageStream_Success(t *testing.T) {
-	archivedAt := "2021-07-01T00:00:00Z"
-	expungeAt := "2021-08-01T00:00:00Z"
+	archivedAt := time.Date(2021, 7, 1, 0, 0, 0, 0, time.UTC)
+	expungeAt := time.Date(2021, 8, 1, 0, 0, 0, 0, time.UTC)
 	want := ArchiveMessageStreamResp{
-		MessageStreamResp: MessageStreamResp{
-			ID:          "my-stream",
-			ServerID:    1,
-			Name:        "My Stream",
-			Description: "A custom stream",
-			ArchivedAt:  &archivedAt,
-			ExpungeAt:   &expungeAt,
-		},
+		ID:          "my-stream",
+		ServerID:    1,
+		Name:        "My Stream",
+		Description: "A custom stream",
+		ArchivedAt:  &archivedAt,
+		ExpungeAt:   &expungeAt,
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -384,11 +423,11 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 	if got.ID != want.ID {
 		t.Errorf("ID = %q, want %q", got.ID, want.ID)
 	}
-	if got.ArchivedAt == nil || *got.ArchivedAt != archivedAt {
-		t.Errorf("ArchivedAt = %v, want %q", got.ArchivedAt, archivedAt)
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(archivedAt) {
+		t.Errorf("ArchivedAt = %v, want %v", got.ArchivedAt, archivedAt)
 	}
-	if got.ExpungeAt == nil || *got.ExpungeAt != expungeAt {
-		t.Errorf("ExpungeAt = %v, want %q", got.ExpungeAt, expungeAt)
+	if got.ExpungeAt == nil || !got.ExpungeAt.Equal(expungeAt) {
+		t.Errorf("ExpungeAt = %v, want %v", got.ExpungeAt, expungeAt)
 	}
 }
 
@@ -420,13 +459,14 @@ func TestArchiveMessageStream_EmptyStreamID(t *testing.T) {
 // ---- UnarchiveMessageStream ----------------------------------------------------
 
 func TestUnarchiveMessageStream_Success(t *testing.T) {
+	createdAt := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
 	want := MessageStreamResp{
 		ID:                "my-stream",
 		ServerID:          1,
 		Name:              "My Stream",
 		Description:       "A custom stream",
 		MessageStreamType: "Transactional",
-		CreatedAt:         "2021-06-01T00:00:00Z",
+		CreatedAt:         createdAt,
 		// ArchivedAt and ExpungeAt must be nil after a successful unarchive.
 	}
 
@@ -456,10 +496,10 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	// The distinguishing postcondition of a successful unarchive is that
 	// ArchivedAt and ExpungeAt are nil.
 	if got.ArchivedAt != nil {
-		t.Errorf("ArchivedAt should be nil after unarchive, got %q", *got.ArchivedAt)
+		t.Errorf("ArchivedAt should be nil after unarchive, got %v", *got.ArchivedAt)
 	}
 	if got.ExpungeAt != nil {
-		t.Errorf("ExpungeAt should be nil after unarchive, got %q", *got.ExpungeAt)
+		t.Errorf("ExpungeAt should be nil after unarchive, got %v", *got.ExpungeAt)
 	}
 }
 
@@ -491,13 +531,13 @@ func TestUnarchiveMessageStream_EmptyStreamID(t *testing.T) {
 // ---- SubscriptionManagementConfiguration --------------------------------------
 
 func TestGetMessageStream_WithSubscriptionManagement(t *testing.T) {
-	smc := &SubscriptionManagementConfiguration{UnsubscribeHandlingType: "Custom"}
+	smc := &SubscriptionManagementConfiguration{UnsubscribeHandlingType: UnsubscribeHandlingCustom}
 	want := MessageStreamResp{
 		ID:                                  "broadcasts",
 		ServerID:                            1,
 		Name:                                "Broadcasts",
 		MessageStreamType:                   "Broadcasts",
-		CreatedAt:                           "2021-01-01T00:00:00Z",
+		CreatedAt:                           time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
 		SubscriptionManagementConfiguration: smc,
 	}
 
