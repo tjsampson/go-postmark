@@ -1,6 +1,7 @@
 package postmark
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -22,7 +23,8 @@ func TestListDomains_Success(t *testing.T) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
-		if !strings.HasSuffix(req.URL.Path, "/domains") {
+		// Exact path check — avoids false positives from paths like /senders/domains.
+		if req.URL.Path != "/domains" {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
 		if !strings.Contains(req.URL.RawQuery, "count=10") {
@@ -46,6 +48,28 @@ func TestListDomains_Success(t *testing.T) {
 	}
 	if len(got.Domains) != 2 {
 		t.Errorf("len(Domains) = %d, want 2", len(got.Domains))
+	}
+}
+
+// TestListDomains_ZeroOffsetAndCount verifies that zero values for count and
+// offset are serialised as "0" in the query string (boundary / pagination edge
+// case).
+func TestListDomains_ZeroOffsetAndCount(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.RawQuery, "count=0") {
+			t.Errorf("expected count=0 in query, got %s", req.URL.RawQuery)
+		}
+		if !strings.Contains(req.URL.RawQuery, "offset=0") {
+			t.Errorf("expected offset=0 in query, got %s", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListDomainsResp{}),
+		}, nil
+	})))
+
+	if _, err := api.ListDomains(0, 0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -136,6 +160,14 @@ func TestCreateDomain_Success(t *testing.T) {
 		if !strings.HasSuffix(req.URL.Path, "/domains") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
+		// Verify the request body is correctly serialised.
+		var body CreateDomainReq
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if body.Name != "newdomain.com" {
+			t.Errorf("request body Name = %q, want newdomain.com", body.Name)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
@@ -164,6 +196,17 @@ func TestCreateDomain_WithReturnPath(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", req.Method)
+		}
+		// Verify both fields are serialised in the request body.
+		var body CreateDomainReq
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if body.Name != "customdomain.com" {
+			t.Errorf("request body Name = %q, want customdomain.com", body.Name)
+		}
+		if body.ReturnPathDomain != "pm-bounces.customdomain.com" {
+			t.Errorf("request body ReturnPathDomain = %q, want pm-bounces.customdomain.com", body.ReturnPathDomain)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -234,6 +277,14 @@ func TestUpdateDomain_Success(t *testing.T) {
 		if !strings.HasSuffix(req.URL.Path, "/domains/7") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
+		// Verify the request body is correctly serialised.
+		var body UpdateDomainReq
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if body.ReturnPathDomain != "new-bounces.example.com" {
+			t.Errorf("request body ReturnPathDomain = %q, want new-bounces.example.com", body.ReturnPathDomain)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
@@ -246,6 +297,20 @@ func TestUpdateDomain_Success(t *testing.T) {
 	}
 	if got.ReturnPathDomain != "new-bounces.example.com" {
 		t.Errorf("ReturnPathDomain = %q, want new-bounces.example.com", got.ReturnPathDomain)
+	}
+}
+
+// TestUpdateDomain_EmptyReq verifies that calling UpdateDomain with an empty
+// UpdateDomainReq returns an error immediately rather than silently sending {}.
+func TestUpdateDomain_EmptyReq(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for an empty UpdateDomainReq")
+		return nil, nil
+	})))
+
+	_, err := api.UpdateDomain(7, &UpdateDomainReq{})
+	if err == nil {
+		t.Fatal("expected an error for empty UpdateDomainReq, got nil")
 	}
 }
 
@@ -422,6 +487,9 @@ func TestVerifyDomainSPF_Success(t *testing.T) {
 		if !strings.HasSuffix(req.URL.Path, "/domains/42/verifyspf") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
+		if ct := req.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
@@ -470,6 +538,9 @@ func TestRotateDomainDKIM_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/domains/42/rotatedkim") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if ct := req.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

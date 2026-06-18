@@ -11,22 +11,22 @@ import (
 type (
 	// DomainResp represents a Postmark Domain as returned by the API.
 	DomainResp struct {
-		ID                           int    `json:"ID"`
-		Name                         string `json:"Name"`
-		SPFVerified                  bool   `json:"SPFVerified"`
-		DKIMVerified                 bool   `json:"DKIMVerified"`
-		WeakDKIM                     bool   `json:"WeakDKIM"`
-		ReturnPathDomain             string `json:"ReturnPathDomain"`
-		ReturnPathDomainVerified     bool   `json:"ReturnPathDomainVerified"`
-		DKIMHost                     string `json:"DKIMHost"`
-		DKIMTextValue                string `json:"DKIMTextValue"`
-		DKIMPendingHost              string `json:"DKIMPendingHost"`
-		DKIMPendingTextValue         string `json:"DKIMPendingTextValue"`
-		DKIMRevokedHost              string `json:"DKIMRevokedHost"`
-		DKIMRevokedTextValue         string `json:"DKIMRevokedTextValue"`
+		ID                            int    `json:"ID"`
+		Name                          string `json:"Name"`
+		SPFVerified                   bool   `json:"SPFVerified"`
+		DKIMVerified                  bool   `json:"DKIMVerified"`
+		WeakDKIM                      bool   `json:"WeakDKIM"`
+		ReturnPathDomain              string `json:"ReturnPathDomain"`
+		ReturnPathDomainVerified      bool   `json:"ReturnPathDomainVerified"`
+		DKIMHost                      string `json:"DKIMHost"`
+		DKIMTextValue                 string `json:"DKIMTextValue"`
+		DKIMPendingHost               string `json:"DKIMPendingHost"`
+		DKIMPendingTextValue          string `json:"DKIMPendingTextValue"`
+		DKIMRevokedHost               string `json:"DKIMRevokedHost"`
+		DKIMRevokedTextValue          string `json:"DKIMRevokedTextValue"`
 		SafeToRemoveRevokedKeyFromDNS bool   `json:"SafeToRemoveRevokedKeyFromDNS"`
-		DKIMUpdateStatus             string `json:"DKIMUpdateStatus"`
-		SafeDomain                   bool   `json:"SafeDomain"`
+		DKIMUpdateStatus              string `json:"DKIMUpdateStatus"`
+		SafeDomain                    bool   `json:"SafeDomain"`
 	}
 
 	// CreateDomainReq is the request body for creating a new Postmark Domain.
@@ -36,6 +36,10 @@ type (
 	}
 
 	// UpdateDomainReq is the request body for updating an existing Postmark Domain.
+	// All fields are optional; omitempty means a zero-value ReturnPathDomain is
+	// omitted from the JSON body, resulting in a no-op PUT.  Callers should
+	// ensure at least one field is non-empty before calling UpdateDomain, which
+	// will return an error if the struct is empty.
 	UpdateDomainReq struct {
 		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
 	}
@@ -50,16 +54,18 @@ type (
 // ListDomains returns a paginated list of all Postmark Domains on the account.
 // count controls the page size and offset controls the starting position.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
-	params := url.Values{}
-	params.Set("count", strconv.Itoa(count))
-	params.Set("offset", strconv.Itoa(offset))
-	req, err := a.newRequest(http.MethodGet, "domains?"+params.Encode(), nil)
+	req, err := a.newRequest(http.MethodGet, "domains", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	params := url.Values{}
+	params.Set("count", strconv.Itoa(count))
+	params.Set("offset", strconv.Itoa(offset))
+	req.URL.RawQuery = params.Encode()
+
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListDomainsResp
@@ -75,9 +81,9 @@ func (a *API) GetDomain(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -94,9 +100,9 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -108,14 +114,19 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 
 // UpdateDomain applies the changes in req to the Postmark Domain identified
 // by domainID and returns the updated DomainResp.
+// It returns an error immediately if req contains no fields to update, since
+// submitting an empty JSON object is a silent no-op.
 func (a *API) UpdateDomain(domainID int, req *UpdateDomainReq) (*DomainResp, error) {
+	if req.ReturnPathDomain == "" {
+		return nil, fmt.Errorf("postmark: UpdateDomainReq has no fields to update")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d", domainID), req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -132,9 +143,9 @@ func (a *API) DeleteDomain(domainID int) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DeleteResp
@@ -151,9 +162,9 @@ func (a *API) VerifyDomainDkim(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -170,9 +181,9 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -183,15 +194,16 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 }
 
 // VerifyDomainSPF triggers SPF verification for the Postmark Domain
-// identified by domainID.
+// identified by domainID.  An empty JSON object body is sent so that
+// Content-Type: application/json is set on the POST request.
 func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), nil)
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), struct{}{})
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
@@ -202,15 +214,16 @@ func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
 }
 
 // RotateDomainDKIM initiates a DKIM key rotation for the Postmark Domain
-// identified by domainID.
+// identified by domainID.  An empty JSON object body is sent so that
+// Content-Type: application/json is set on the POST request.
 func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotatedkim", domainID), nil)
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotatedkim", domainID), struct{}{})
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DomainResp
