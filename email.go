@@ -28,24 +28,28 @@ type (
 	// At least one of HtmlBody or TextBody must be non-empty; Postmark will
 	// reject the request with a 422 if both are absent.
 	SendEmailReq struct {
-		From          string            `json:"From"`
-		To            string            `json:"To"`
-		Cc            string            `json:"Cc,omitempty"`
-		Bcc           string            `json:"Bcc,omitempty"`
-		Subject       string            `json:"Subject"`
+		From    string `json:"From"`
+		To      string `json:"To"`
+		Cc      string `json:"Cc,omitempty"`
+		Bcc     string `json:"Bcc,omitempty"`
+		Subject string `json:"Subject"`
 		// HtmlBody is the HTML body of the email. At least one of HtmlBody or
 		// TextBody must be set; Postmark requires a non-empty body.
-		HtmlBody      string            `json:"HtmlBody,omitempty"`
+		HtmlBody string `json:"HtmlBody,omitempty"`
 		// TextBody is the plain-text body of the email. At least one of HtmlBody
 		// or TextBody must be set; Postmark requires a non-empty body.
-		TextBody      string            `json:"TextBody,omitempty"`
-		ReplyTo       string            `json:"ReplyTo,omitempty"`
-		Headers       []EmailHeader     `json:"Headers,omitempty"`
+		TextBody string        `json:"TextBody,omitempty"`
+		ReplyTo  string        `json:"ReplyTo,omitempty"`
+		Headers  []EmailHeader `json:"Headers,omitempty"`
 		// TrackOpens controls whether open tracking is enabled for this message.
 		// A nil value omits the field (server default applies); false explicitly
 		// disables tracking even on a stream where it is enabled by default.
-		TrackOpens    *bool             `json:"TrackOpens,omitempty"`
-		TrackLinks    string            `json:"TrackLinks,omitempty"`
+		TrackOpens *bool  `json:"TrackOpens,omitempty"`
+		TrackLinks string `json:"TrackLinks,omitempty"`
+		// MessageStream is the message stream to route this message through.
+		// If empty, Postmark uses the default outbound stream. Set this to
+		// route the message to a non-default stream (e.g. a transactional
+		// or broadcast stream configured on the server).
 		MessageStream string            `json:"MessageStream,omitempty"`
 		Attachments   []Attachment      `json:"Attachments,omitempty"`
 		Tag           string            `json:"Tag,omitempty"`
@@ -63,7 +67,8 @@ type (
 )
 
 // SendEmail sends a single email via the Postmark API (POST /email).
-// It uses the server token (X-Postmark-Server-Token) for authentication.
+// It uses the server token (X-Postmark-Server-Token) for authentication;
+// supply ServerTokenOpt or set POSTMARK_SERVER_TOKEN in the environment.
 // req must not be nil.
 func (a *API) SendEmail(req *SendEmailReq) (*SendEmailResp, error) {
 	if req == nil {
@@ -87,8 +92,16 @@ func (a *API) SendEmail(req *SendEmailReq) (*SendEmailResp, error) {
 
 // SendEmailBatch sends multiple emails in a single request via the Postmark
 // API (POST /email/batch). It uses the server token (X-Postmark-Server-Token)
-// for authentication.
+// for authentication; supply ServerTokenOpt or set POSTMARK_SERVER_TOKEN in
+// the environment.
+//
+// An empty slice is a valid call (Postmark accepts an empty array and returns
+// an empty array). A nil slice is treated identically to an empty slice and
+// returns ([]SendEmailResp{}, nil) without making a network request.
 func (a *API) SendEmailBatch(reqs []SendEmailReq) ([]SendEmailResp, error) {
+	if reqs == nil {
+		return []SendEmailResp{}, nil
+	}
 	httpReq, err := a.newServerRequest(http.MethodPost, "email/batch", reqs)
 	if err != nil {
 		return nil, err

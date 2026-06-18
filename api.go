@@ -93,8 +93,18 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 // newServerRequest builds an *http.Request for the given HTTP method and API path
 // using the server token (X-Postmark-Server-Token header). This is used for
 // email-sending endpoints which require a server token rather than an account token.
+//
+// The server token is resolved via resolveServerToken: the value set by
+// ServerTokenOpt takes precedence, falling back to the POSTMARK_SERVER_TOKEN
+// environment variable. An empty token (neither option nor env var set) is
+// rejected with an error rather than sending an unauthenticated request that
+// would fail with a cryptic 401 from Postmark.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
-	return a.newRequestWithHeader(method, path, "X-Postmark-Server-Token", resolveServerToken(a), body)
+	tok := resolveServerToken(a)
+	if tok == "" {
+		return nil, fmt.Errorf("postmark: server token is empty; set ServerTokenOpt or POSTMARK_SERVER_TOKEN")
+	}
+	return a.newRequestWithHeader(method, path, "X-Postmark-Server-Token", tok, body)
 }
 
 // newRequestWithHeader is the underlying request builder. It sets the given

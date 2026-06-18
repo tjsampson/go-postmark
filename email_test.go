@@ -239,6 +239,40 @@ func TestSendEmail_TrackOpensNil(t *testing.T) {
 	}
 }
 
+// TestSendEmail_MessageStream verifies that setting MessageStream to a
+// non-default value sends it in the request body so Postmark routes the
+// message through the correct stream.
+func TestSendEmail_MessageStream(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			var parsed SendEmailReq
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				t.Fatalf("invalid request body: %v", err)
+			}
+			if parsed.MessageStream != "broadcasts" {
+				t.Errorf("MessageStream = %q, want broadcasts", parsed.MessageStream)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{Message: "OK"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{
+		From:          "a@b.com",
+		To:            "c@d.com",
+		Subject:       "broadcast",
+		TextBody:      "hi",
+		MessageStream: "broadcasts",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSendEmail_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 300, Message: "Invalid email request"}
 
@@ -256,7 +290,7 @@ func TestSendEmail_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	// Assert error is a *PostmarkErr with the correct code.
+	// Assert error is a PostmarkErr with the correct code.
 	var pe PostmarkErr
 	if !errors.As(err, &pe) {
 		t.Fatalf("expected error to be PostmarkErr, got %T: %v", err, err)
@@ -294,6 +328,50 @@ func TestSendEmail_NilRequest(t *testing.T) {
 	_, err := api.SendEmail(nil)
 	if err == nil {
 		t.Fatal("expected error for nil request, got nil")
+	}
+}
+
+// TestSendEmail_EmptyServerToken verifies that calling SendEmail when no server
+// token is configured (neither ServerTokenOpt nor POSTMARK_SERVER_TOKEN) returns
+// an error rather than sending an unauthenticated request.
+func TestSendEmail_EmptyServerToken(t *testing.T) {
+	// Ensure the env var is unset for this test.
+	t.Setenv("POSTMARK_SERVER_TOKEN", "")
+
+	api := New(
+		// Deliberately omit ServerTokenOpt.
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP request should not be made when server token is empty")
+			return nil, fmt.Errorf("should not reach transport")
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "a@b.com", To: "c@d.com", Subject: "no token"})
+	if err == nil {
+		t.Fatal("expected error for empty server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token") {
+		t.Errorf("expected error message to mention server token, got: %v", err)
+	}
+}
+
+// TestSendEmailBatch_EmptyServerToken verifies the same guard for SendEmailBatch.
+func TestSendEmailBatch_EmptyServerToken(t *testing.T) {
+	t.Setenv("POSTMARK_SERVER_TOKEN", "")
+
+	api := New(
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP request should not be made when server token is empty")
+			return nil, fmt.Errorf("should not reach transport")
+		})),
+	)
+
+	_, err := api.SendEmailBatch([]SendEmailReq{{From: "a@b.com"}})
+	if err == nil {
+		t.Fatal("expected error for empty server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token") {
+		t.Errorf("expected error message to mention server token, got: %v", err)
 	}
 }
 
@@ -441,6 +519,26 @@ func TestSendEmailBatch_Empty(t *testing.T) {
 	}
 }
 
+// TestSendEmailBatch_Nil verifies that a nil slice is treated as empty —
+// it returns ([]SendEmailResp{}, nil) without making a network request.
+func TestSendEmailBatch_Nil(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP request should not be made for nil slice")
+			return nil, fmt.Errorf("should not reach transport")
+		})),
+	)
+
+	got, err := api.SendEmailBatch(nil)
+	if err != nil {
+		t.Fatalf("unexpected error for nil slice: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("expected empty non-nil slice, got %v", got)
+	}
+}
+
 // ---- ServerTokenOpt env fallback -----------------------------------------------
 
 func TestSendEmail_UsesServerTokenEnvFallback(t *testing.T) {
@@ -519,6 +617,35 @@ func TestSendEmail_DoesNotUseAccountToken(t *testing.T) {
 	}
 }
 
+// TestCreateServer_UsesAccountToken verifies that account-token endpoints
+// (e.g. CreateServer) still send X-Postmark-Account-Token and do NOT send
+// X-Postmark-Server-Token, ensuring the two auth paths don't regress.
+func TestCreateServer_UsesAccountToken(t *testing.T) {
+	api := New(
+		APITokenOpt("my-account-token"),
+		ServerTokenOpt("my-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			acct := req.Header.Get("X-Postmark-Account-Token")
+			srv := req.Header.Get("X-Postmark-Server-Token")
+			if acct != "my-account-token" {
+				t.Errorf("X-Postmark-Account-Token = %q, want my-account-token", acct)
+			}
+			if srv != "" {
+				t.Errorf("X-Postmark-Server-Token should not be set on server endpoint, got %q", srv)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, ServerResp{ID: 1, Name: "Regression"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.CreateServer(&CreateServerReq{Name: "Regression"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestSendEmailBatch_NotFound asserts that a 404 response returns ErrNotFound.
 func TestSendEmailBatch_NotFound(t *testing.T) {
 	api := New(
@@ -550,7 +677,7 @@ func TestSendEmail_SubmittedAtParsed(t *testing.T) {
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body:       jsonBody(t, SendEmailResp{
+				Body: jsonBody(t, SendEmailResp{
 					To:          "x@y.com",
 					SubmittedAt: wantTime,
 					MessageID:   "ts-check",
