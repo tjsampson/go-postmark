@@ -198,6 +198,34 @@ func TestSendEmail_TrackOpensFalse(t *testing.T) {
 	})
 }
 
+// TestSendEmail_ErrorCodeSurfaced verifies that a non-zero ErrorCode in an
+// otherwise HTTP-200 response is surfaced as a Go error. Postmark returns HTTP
+// 200 for per-message failures inside batch-like contexts; callers should not
+// need to manually inspect ErrorCode.
+func TestSendEmail_ErrorCodeSurfaced(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{ErrorCode: 406, Message: "Inactive recipient"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "a@a.com", To: "b@b.com"})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 response, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 406 {
+		t.Errorf("ErrorCode = %d, want 406", pmErr.ErrorCode)
+	}
+}
+
 func TestSendEmail_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 422, Message: "Invalid email address"}
 
@@ -286,13 +314,13 @@ func TestSendBatch_Success(t *testing.T) {
 					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
 						t.Errorf("expected X-Postmark-Server-Token header")
 					}
-					// Verify the request body wraps messages in a "Messages" key.
-					var body batchEmailReqWrapper
+					// Verify the request body is a bare JSON array (no wrapper object).
+					var body []SendEmailReq
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-						t.Errorf("failed to decode request body: %v", err)
+						t.Errorf("failed to decode request body as bare array: %v", err)
 					}
-					if len(body.Messages) != len(tc.reqs) {
-						t.Errorf("body.Messages length = %d, want %d", len(body.Messages), len(tc.reqs))
+					if len(body) != len(tc.reqs) {
+						t.Errorf("body array length = %d, want %d", len(body), len(tc.reqs))
 					}
 					return &http.Response{
 						StatusCode: http.StatusOK,
@@ -317,18 +345,20 @@ func TestSendBatch_Success(t *testing.T) {
 	}
 }
 
-// TestSendBatch_WrapsMessages verifies that the wire format sent to
-// POST /email/batch is {"Messages":[…]} and not a bare JSON array.
-func TestSendBatch_WrapsMessages(t *testing.T) {
+// TestSendBatch_BareJSONArray verifies that the wire format sent to
+// POST /email/batch is a bare JSON array, NOT a wrapped object like
+// {"Messages":[…]}. The Postmark /email/batch API expects a top-level array.
+func TestSendBatch_BareJSONArray(t *testing.T) {
 	api := New(
 		ServerTokenOpt("srv-tok"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-			var raw map[string]json.RawMessage
+			// The body must decode as a JSON array, not an object.
+			var raw json.RawMessage
 			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
 				t.Fatalf("failed to decode body: %v", err)
 			}
-			if _, ok := raw["Messages"]; !ok {
-				t.Error("expected 'Messages' key in request body for /email/batch")
+			if len(raw) == 0 || raw[0] != '[' {
+				t.Errorf("expected bare JSON array for /email/batch, got: %s", string(raw))
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -528,6 +558,32 @@ func TestSendWithTemplate_InlineCssFalse(t *testing.T) {
 	})
 }
 
+// TestSendWithTemplate_ErrorCodeSurfaced verifies that a non-zero ErrorCode in
+// an HTTP-200 response is surfaced as a Go error.
+func TestSendWithTemplate_ErrorCodeSurfaced(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{ErrorCode: 1101, Message: "template not found"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateAlias: "missing"})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 response, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1101 {
+		t.Errorf("ErrorCode = %d, want 1101", pmErr.ErrorCode)
+	}
+}
+
 func TestSendWithTemplate_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 1101, Message: "template not found"}
 
@@ -592,6 +648,7 @@ func TestSendBatchWithTemplates_Success(t *testing.T) {
 						t.Errorf("expected X-Postmark-Server-Token header")
 					}
 					// Verify the request body wraps messages in a "Messages" key
+					// (Postmark batchWithTemplates requires {"Messages":[…]}).
 					var body batchTemplateReqWrapper
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 						t.Errorf("failed to decode request body: %v", err)
@@ -622,8 +679,10 @@ func TestSendBatchWithTemplates_Success(t *testing.T) {
 	}
 }
 
+// TestSendBatchWithTemplates_WrapsMessages verifies that the wire format for
+// POST /email/batchWithTemplates is {"Messages":[…]} (a wrapped object), which
+// is what the Postmark API requires for this endpoint.
 func TestSendBatchWithTemplates_WrapsMessages(t *testing.T) {
-	// Verify that the Messages wrapper key is present in the request body.
 	api := New(
 		ServerTokenOpt("srv-tok"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -740,13 +799,13 @@ func TestCreateBulkJob_Success(t *testing.T) {
 					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
 						t.Errorf("expected X-Postmark-Server-Token header")
 					}
-					// Verify the request body wraps messages in a "Messages" key
-					var body bulkEmailReqWrapper
+					// Verify the request body is a bare JSON array (no wrapper object).
+					var body []SendEmailReq
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-						t.Errorf("failed to decode request body: %v", err)
+						t.Errorf("failed to decode request body as bare array: %v", err)
 					}
-					if len(body.Messages) != len(tc.reqs) {
-						t.Errorf("body.Messages length = %d, want %d", len(body.Messages), len(tc.reqs))
+					if len(body) != len(tc.reqs) {
+						t.Errorf("body array length = %d, want %d", len(body), len(tc.reqs))
 					}
 					return &http.Response{
 						StatusCode: http.StatusOK,
@@ -781,17 +840,20 @@ func TestCreateBulkJob_Success(t *testing.T) {
 	}
 }
 
-func TestCreateBulkJob_WrapsMessages(t *testing.T) {
-	// Verify the Messages wrapper key is present in the request body.
+// TestCreateBulkJob_BareJSONArray verifies that the wire format sent to
+// POST /email/bulk is a bare JSON array, NOT a wrapped object like
+// {"Messages":[…]}. The Postmark /email/bulk API expects a top-level array.
+func TestCreateBulkJob_BareJSONArray(t *testing.T) {
 	api := New(
 		ServerTokenOpt("srv-tok"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-			var raw map[string]json.RawMessage
+			// The body must decode as a JSON array, not an object.
+			var raw json.RawMessage
 			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
 				t.Fatalf("failed to decode body: %v", err)
 			}
-			if _, ok := raw["Messages"]; !ok {
-				t.Error("expected 'Messages' key in request body for bulk job")
+			if len(raw) == 0 || raw[0] != '[' {
+				t.Errorf("expected bare JSON array for /email/bulk, got: %s", string(raw))
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -935,6 +997,31 @@ func TestGetBulkJob_EmptyID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty id, got nil")
 	}
+}
+
+// TestGetBulkJob_URLEncoding verifies that special characters in a job ID are
+// percent-encoded in the URL path so callers cannot inject extra path segments.
+func TestGetBulkJob_URLEncoding(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// net/http decodes %2F back to / in req.URL.Path; the encoded form is
+			// only preserved in req.URL.RawPath. Verify RawPath contains %2F so
+			// the slash in the job ID cannot open a new path segment on the wire.
+			rawPath := req.URL.RawPath
+			if rawPath == "" {
+				rawPath = req.URL.Path // fallback: no encoding needed
+			}
+			if !strings.Contains(rawPath, "bulk%2Fextra") {
+				t.Errorf("expected %%2F-encoded slash in RawPath, got: %s", rawPath)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, BulkJobResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.GetBulkJob("bulk/extra")
 }
 
 func TestGetBulkJob_NotFound(t *testing.T) {
