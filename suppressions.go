@@ -92,7 +92,7 @@ func (a *API) ListSuppressions(streamID string, params SuppressionsParams) (*Sup
 		qp.Set("ToDate", params.ToDate)
 	}
 
-	path := fmt.Sprintf("message-streams/%s/suppressions/dump", streamID)
+	path := fmt.Sprintf("message-streams/%s/suppressions/dump", url.PathEscape(streamID))
 	if len(qp) > 0 {
 		path = path + "?" + qp.Encode()
 	}
@@ -123,7 +123,7 @@ func (a *API) CreateSuppression(streamID string, req *CreateSuppressionReq) (*Su
 
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,
-		fmt.Sprintf("message-streams/%s/suppressions", streamID),
+		fmt.Sprintf("message-streams/%s/suppressions", url.PathEscape(streamID)),
 		req,
 	)
 	if err != nil {
@@ -151,7 +151,7 @@ func (a *API) DeleteSuppression(streamID string, req *DeleteSuppressionReq) (*Su
 
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,
-		fmt.Sprintf("message-streams/%s/suppressions/delete", streamID),
+		fmt.Sprintf("message-streams/%s/suppressions/delete", url.PathEscape(streamID)),
 		req,
 	)
 	if err != nil {

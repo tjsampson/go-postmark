@@ -15,8 +15,8 @@ func TestListMessageStreams_Success(t *testing.T) {
 	want := ListMessageStreamsResp{
 		TotalCount: 2,
 		MessageStreams: []MessageStreamResp{
-			{ID: "outbound", ServerID: 1, Name: "Outbound", MessageStreamType: "Transactional", CreatedAt: now},
-			{ID: "broadcasts", ServerID: 1, Name: "Broadcasts", MessageStreamType: "Broadcasts", CreatedAt: now},
+			{ID: "outbound", ServerID: 1, Name: "Outbound", MessageStreamType: MessageStreamTypeTransactional, CreatedAt: now},
+			{ID: "broadcasts", ServerID: 1, Name: "Broadcasts", MessageStreamType: MessageStreamTypeBroadcasts, CreatedAt: now},
 		},
 	}
 
@@ -60,7 +60,7 @@ func TestListMessageStreams_Success(t *testing.T) {
 func TestListMessageStreams_WithStreamTypeFilter(t *testing.T) {
 	want := ListMessageStreamsResp{
 		TotalCount:     1,
-		MessageStreams: []MessageStreamResp{{ID: "outbound", MessageStreamType: "Transactional"}},
+		MessageStreams: []MessageStreamResp{{ID: "outbound", MessageStreamType: MessageStreamTypeTransactional}},
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -132,7 +132,7 @@ func TestGetMessageStream_Success(t *testing.T) {
 		ID:                "outbound",
 		ServerID:          42,
 		Name:              "Outbound",
-		MessageStreamType: "Transactional",
+		MessageStreamType: MessageStreamTypeTransactional,
 		CreatedAt:         now,
 	}
 
@@ -162,7 +162,7 @@ func TestGetMessageStream_Success(t *testing.T) {
 	if got.Name != "Outbound" {
 		t.Errorf("Name = %q, want Outbound", got.Name)
 	}
-	if got.MessageStreamType != "Transactional" {
+	if got.MessageStreamType != MessageStreamTypeTransactional {
 		t.Errorf("MessageStreamType = %q, want Transactional", got.MessageStreamType)
 	}
 }
@@ -200,7 +200,7 @@ func TestCreateMessageStream_Success(t *testing.T) {
 		ID:                "my-stream",
 		ServerID:          1,
 		Name:              "My Stream",
-		MessageStreamType: "Transactional",
+		MessageStreamType: MessageStreamTypeTransactional,
 		CreatedAt:         now,
 	}
 
@@ -225,7 +225,7 @@ func TestCreateMessageStream_Success(t *testing.T) {
 	got, err := api.CreateMessageStream(&CreateMessageStreamReq{
 		ID:                "my-stream",
 		Name:              "My Stream",
-		MessageStreamType: "Transactional",
+		MessageStreamType: MessageStreamTypeTransactional,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -235,6 +235,16 @@ func TestCreateMessageStream_Success(t *testing.T) {
 	}
 	if got.Name != "My Stream" {
 		t.Errorf("Name = %q, want My Stream", got.Name)
+	}
+}
+
+// TestCreateMessageStream_NilReq verifies that passing a nil request returns an
+// error immediately without making a network call.
+func TestCreateMessageStream_NilReq(t *testing.T) {
+	api := New()
+	_, err := api.CreateMessageStream(nil)
+	if err == nil {
+		t.Fatal("expected an error for nil request, got nil")
 	}
 }
 
@@ -248,7 +258,7 @@ func TestCreateMessageStream_WithSubscriptionConfig(t *testing.T) {
 		ID:                                  "broadcasts",
 		ServerID:                            1,
 		Name:                                "Broadcasts",
-		MessageStreamType:                   "Broadcasts",
+		MessageStreamType:                   MessageStreamTypeBroadcasts,
 		CreatedAt:                           now,
 		SubscriptionManagementConfiguration: cfg,
 	}
@@ -263,7 +273,7 @@ func TestCreateMessageStream_WithSubscriptionConfig(t *testing.T) {
 	got, err := api.CreateMessageStream(&CreateMessageStreamReq{
 		ID:                                  "broadcasts",
 		Name:                                "Broadcasts",
-		MessageStreamType:                   "Broadcasts",
+		MessageStreamType:                   MessageStreamTypeBroadcasts,
 		SubscriptionManagementConfiguration: cfg,
 	})
 	if err != nil {
@@ -291,7 +301,7 @@ func TestCreateMessageStream_APIError(t *testing.T) {
 	_, err := api.CreateMessageStream(&CreateMessageStreamReq{
 		ID:                "bad",
 		Name:              "Bad",
-		MessageStreamType: "Transactional",
+		MessageStreamType: MessageStreamTypeTransactional,
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
@@ -345,6 +355,16 @@ func TestUpdateMessageStream_EmptyID(t *testing.T) {
 	}
 }
 
+// TestUpdateMessageStream_NilReq verifies that passing a nil request returns an
+// error immediately without making a network call.
+func TestUpdateMessageStream_NilReq(t *testing.T) {
+	api := New()
+	_, err := api.UpdateMessageStream("outbound", nil)
+	if err == nil {
+		t.Fatal("expected an error for nil request, got nil")
+	}
+}
+
 func TestUpdateMessageStream_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -378,6 +398,10 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/message-streams/outbound/archive") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		// Verify Content-Type is set (non-nil body `{}` was sent).
+		if req.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type application/json, got %q", req.Header.Get("Content-Type"))
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -439,6 +463,10 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/message-streams/outbound/unarchive") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		// Verify Content-Type is set (non-nil body `{}` was sent).
+		if req.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type application/json, got %q", req.Header.Get("Content-Type"))
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

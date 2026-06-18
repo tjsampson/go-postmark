@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+// MessageStreamType is a named string type for the Postmark message stream
+// category. Using a named type instead of a plain string prevents silent typos
+// at compile time when the caller constructs a CreateMessageStreamReq.
+type MessageStreamType string
+
+const (
+	// MessageStreamTypeTransactional is used for transactional email streams.
+	MessageStreamTypeTransactional MessageStreamType = "Transactional"
+	// MessageStreamTypeBroadcasts is used for broadcast / bulk email streams.
+	MessageStreamTypeBroadcasts MessageStreamType = "Broadcasts"
+	// MessageStreamTypeInboundSpam is used for inbound spam streams.
+	MessageStreamTypeInboundSpam MessageStreamType = "InboundSpam"
+)
+
 type (
 	// SubscriptionManagementConfiguration holds the unsubscribe handling config
 	// for a message stream.
@@ -22,7 +36,7 @@ type (
 		ServerID                            int                                  `json:"ServerID"`
 		Name                                string                               `json:"Name"`
 		Description                         string                               `json:"Description"`
-		MessageStreamType                   string                               `json:"MessageStreamType"`
+		MessageStreamType                   MessageStreamType                    `json:"MessageStreamType"`
 		CreatedAt                           time.Time                            `json:"CreatedAt"`
 		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
 		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
@@ -41,7 +55,7 @@ type (
 		ID                                  string                               `json:"ID"`
 		Name                                string                               `json:"Name"`
 		Description                         string                               `json:"Description,omitempty"`
-		MessageStreamType                   string                               `json:"MessageStreamType"`
+		MessageStreamType                   MessageStreamType                    `json:"MessageStreamType"`
 		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
 	}
 
@@ -120,7 +134,7 @@ func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
 		return nil, errEmptyStreamID
 	}
 
-	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", streamID), nil)
+	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", url.PathEscape(streamID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +152,13 @@ func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
 }
 
 // CreateMessageStream creates a new message stream with the settings in req.
+// req must not be nil; passing nil will return an error before any network call.
 // It returns the full MessageStreamResp on success.
 func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamResp, error) {
+	if req == nil {
+		return nil, fmt.Errorf("CreateMessageStreamReq must not be nil")
+	}
+
 	httpReq, err := a.newServerRequest(http.MethodPost, "message-streams", req)
 	if err != nil {
 		return nil, err
@@ -159,12 +178,16 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 
 // UpdateMessageStream applies the changes in req to the message stream
 // identified by streamID and returns the updated MessageStreamResp.
+// req must not be nil; passing nil will return an error before any network call.
 func (a *API) UpdateMessageStream(streamID string, req *UpdateMessageStreamReq) (*MessageStreamResp, error) {
 	if streamID == "" {
 		return nil, errEmptyStreamID
 	}
+	if req == nil {
+		return nil, fmt.Errorf("UpdateMessageStreamReq must not be nil")
+	}
 
-	httpReq, err := a.newServerRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", streamID), req)
+	httpReq, err := a.newServerRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", url.PathEscape(streamID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +206,20 @@ func (a *API) UpdateMessageStream(streamID string, req *UpdateMessageStreamReq) 
 
 // ArchiveMessageStream archives the message stream identified by streamID.
 // It returns a MessageStreamArchiveResp containing the expunge timestamp.
+// An empty JSON body ({}) is sent so that the server receives a valid
+// Content-Type: application/json header, which some Postmark endpoints require.
 func (a *API) ArchiveMessageStream(streamID string) (*MessageStreamArchiveResp, error) {
 	if streamID == "" {
 		return nil, errEmptyStreamID
 	}
 
-	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", streamID), nil)
+	// Pass an empty struct so newRequest sets Content-Type: application/json
+	// and sends `{}` as the body, satisfying Postmark's POST requirements.
+	httpReq, err := a.newServerRequest(
+		http.MethodPost,
+		fmt.Sprintf("message-streams/%s/archive", url.PathEscape(streamID)),
+		struct{}{},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +238,20 @@ func (a *API) ArchiveMessageStream(streamID string) (*MessageStreamArchiveResp, 
 
 // UnarchiveMessageStream unarchives the message stream identified by streamID
 // and returns the restored MessageStreamResp.
+// An empty JSON body ({}) is sent so that the server receives a valid
+// Content-Type: application/json header, which some Postmark endpoints require.
 func (a *API) UnarchiveMessageStream(streamID string) (*MessageStreamResp, error) {
 	if streamID == "" {
 		return nil, errEmptyStreamID
 	}
 
-	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", streamID), nil)
+	// Pass an empty struct so newRequest sets Content-Type: application/json
+	// and sends `{}` as the body, satisfying Postmark's POST requirements.
+	httpReq, err := a.newServerRequest(
+		http.MethodPost,
+		fmt.Sprintf("message-streams/%s/unarchive", url.PathEscape(streamID)),
+		struct{}{},
+	)
 	if err != nil {
 		return nil, err
 	}
