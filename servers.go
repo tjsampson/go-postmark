@@ -85,6 +85,10 @@ type (
 // with the same name already exists (HTTP 409 Conflict).
 var ErrExists = NewError(http.StatusConflict, "server already exists")
 
+// ErrNotFound is returned when the requested server does not exist (HTTP 404 Not Found).
+// Callers can detect this condition with errors.Is(err, postmark.ErrNotFound).
+var ErrNotFound = NewError(http.StatusNotFound, "server not found")
+
 // Error implements the error interface for PostmarkErr.
 func (pe PostmarkErr) Error() string {
 	return fmt.Sprintf("%s Error Code=%v", pe.Message, pe.ErrorCode)
@@ -93,6 +97,23 @@ func (pe PostmarkErr) Error() string {
 // Code returns the numeric Postmark error code from the API response.
 func (pe PostmarkErr) Code() int {
 	return pe.ErrorCode
+}
+
+// Is reports whether pe matches target, enabling errors.Is comparisons.
+// Two PostmarkErr values are considered equal when their ErrorCode fields match,
+// so errors.Is(err, ErrNotFound) and errors.Is(err, ErrExists) work correctly
+// regardless of the Message text.
+func (pe PostmarkErr) Is(target error) bool {
+	var t *PostmarkErr
+	switch v := target.(type) {
+	case *PostmarkErr:
+		t = v
+	case PostmarkErr:
+		t = &v
+	default:
+		return false
+	}
+	return pe.ErrorCode == t.ErrorCode
 }
 
 // NewError creates a new *PostmarkErr with the given code and formatted message.

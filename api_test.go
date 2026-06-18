@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -164,6 +165,25 @@ func TestReadServer_Success(t *testing.T) {
 	}
 }
 
+// TestReadServer_NotFound asserts that a 404 response causes ReadServer to
+// return ErrNotFound, detectable via errors.Is.
+func TestReadServer_NotFound(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Server not found"}),
+		}, nil
+	})))
+
+	_, err := api.ReadServer("9999")
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
 // ---- ListServers ---------------------------------------------------------------
 
 func TestListServers_Success(t *testing.T) {
@@ -212,6 +232,25 @@ func TestDeleteServer_Success(t *testing.T) {
 	}
 }
 
+// TestDeleteServer_NotFound asserts that a 404 response causes DeleteServer to
+// return ErrNotFound, detectable via errors.Is.
+func TestDeleteServer_NotFound(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Server not found"}),
+		}, nil
+	})))
+
+	_, err := api.DeleteServer("9999")
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
 // ---- UpdateServer --------------------------------------------------------------
 
 func TestUpdateServer_Success(t *testing.T) {
@@ -233,5 +272,24 @@ func TestUpdateServer_Success(t *testing.T) {
 	}
 	if got.Name != "Renamed" {
 		t.Errorf("Name = %q, want Renamed", got.Name)
+	}
+}
+
+// TestUpdateServer_NotFound asserts that a 404 response causes UpdateServer to
+// return ErrNotFound, detectable via errors.Is.
+func TestUpdateServer_NotFound(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: http.StatusNotFound, Message: "Server not found"}),
+		}, nil
+	})))
+
+	_, err := api.UpdateServer("9999", &UpdateServerReq{Name: "Ghost"})
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
 	}
 }
