@@ -76,14 +76,13 @@ type (
 	}
 )
 
-// SignatureResp is the full sender signature response returned by
-// create/get/edit/rotate operations. It is an alias for SignatureDetails so
-// callers access fields directly without an extra embedding layer.
-type SignatureResp = SignatureDetails
-
 // ListSignatures returns a paginated list of sender signatures on the account.
-// count controls the page size and offset controls the starting position.
+// count controls the page size (must be at least 1) and offset controls the
+// starting position.
 func (a *API) ListSignatures(count, offset int) (*ListSignaturesResp, error) {
+	if count < 1 {
+		return nil, fmt.Errorf("postmark: count must be at least 1, got %d", count)
+	}
 	req, err := a.newRequest(http.MethodGet, "senders", nil)
 	if err != nil {
 		return nil, err
@@ -105,7 +104,7 @@ func (a *API) ListSignatures(count, offset int) (*ListSignaturesResp, error) {
 }
 
 // GetSignature fetches the sender signature identified by sigID.
-func (a *API) GetSignature(sigID int) (*SignatureResp, error) {
+func (a *API) GetSignature(sigID int) (*SignatureDetails, error) {
 	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("senders/%d", sigID), nil)
 	if err != nil {
 		return nil, err
@@ -114,7 +113,7 @@ func (a *API) GetSignature(sigID int) (*SignatureResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data SignatureResp
+	var data SignatureDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -122,7 +121,7 @@ func (a *API) GetSignature(sigID int) (*SignatureResp, error) {
 }
 
 // CreateSignature creates a new sender signature with the settings in sigReq.
-func (a *API) CreateSignature(sigReq *CreateSignatureReq) (*SignatureResp, error) {
+func (a *API) CreateSignature(sigReq *CreateSignatureReq) (*SignatureDetails, error) {
 	req, err := a.newRequest(http.MethodPost, "senders", sigReq)
 	if err != nil {
 		return nil, err
@@ -131,7 +130,7 @@ func (a *API) CreateSignature(sigReq *CreateSignatureReq) (*SignatureResp, error
 	if err != nil {
 		return nil, err
 	}
-	var data SignatureResp
+	var data SignatureDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -139,7 +138,7 @@ func (a *API) CreateSignature(sigReq *CreateSignatureReq) (*SignatureResp, error
 }
 
 // EditSignature applies the changes in editReq to the sender signature identified by sigID.
-func (a *API) EditSignature(sigID int, editReq *EditSignatureReq) (*SignatureResp, error) {
+func (a *API) EditSignature(sigID int, editReq *EditSignatureReq) (*SignatureDetails, error) {
 	req, err := a.newRequest(http.MethodPut, fmt.Sprintf("senders/%d", sigID), editReq)
 	if err != nil {
 		return nil, err
@@ -148,7 +147,7 @@ func (a *API) EditSignature(sigID int, editReq *EditSignatureReq) (*SignatureRes
 	if err != nil {
 		return nil, err
 	}
-	var data SignatureResp
+	var data SignatureDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -191,7 +190,7 @@ func (a *API) ResendSignatureConfirmation(sigID int) (*ResendResp, error) {
 }
 
 // RotateSignatureDKIM rotates the DKIM key for the sender signature identified by sigID.
-func (a *API) RotateSignatureDKIM(sigID int) (*SignatureResp, error) {
+func (a *API) RotateSignatureDKIM(sigID int) (*SignatureDetails, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("senders/%d/rotateDkim", sigID), nil)
 	if err != nil {
 		return nil, err
@@ -200,7 +199,7 @@ func (a *API) RotateSignatureDKIM(sigID int) (*SignatureResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data SignatureResp
+	var data SignatureDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}

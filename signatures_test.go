@@ -53,6 +53,17 @@ func TestListSignatures_Success(t *testing.T) {
 	}
 }
 
+func TestListSignatures_InvalidCount(t *testing.T) {
+	api := New()
+
+	for _, count := range []int{0, -1, -100} {
+		_, err := api.ListSignatures(count, 0)
+		if err == nil {
+			t.Errorf("ListSignatures(%d, 0): expected error for count < 1, got nil", count)
+		}
+	}
+}
+
 func TestListSignatures_APIError(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -70,7 +81,7 @@ func TestListSignatures_APIError(t *testing.T) {
 // ---- GetSignature -------------------------------------------------------------
 
 func TestGetSignature_Success(t *testing.T) {
-	want := SignatureResp{
+	want := SignatureDetails{
 		ID:           42,
 		EmailAddress: "hello@example.com",
 		Name:         "Hello Sender",
@@ -122,7 +133,7 @@ func TestGetSignature_NotFound(t *testing.T) {
 // ---- CreateSignature ----------------------------------------------------------
 
 func TestCreateSignature_Success(t *testing.T) {
-	want := SignatureResp{
+	want := SignatureDetails{
 		ID:           10,
 		EmailAddress: "new@example.com",
 		Name:         "New Sender",
@@ -191,7 +202,7 @@ func TestCreateSignature_APIError(t *testing.T) {
 // ---- EditSignature ------------------------------------------------------------
 
 func TestEditSignature_Success(t *testing.T) {
-	want := SignatureResp{
+	want := SignatureDetails{
 		ID:   7,
 		Name: "Updated Sender",
 	}
@@ -332,7 +343,7 @@ func TestResendSignatureConfirmation_NotFound(t *testing.T) {
 // ---- RotateSignatureDKIM -----------------------------------------------------
 
 func TestRotateSignatureDKIM_Success(t *testing.T) {
-	want := SignatureResp{
+	want := SignatureDetails{
 		ID:              9,
 		DKIMPendingHost: "new-dkim._domainkey.example.com",
 	}

@@ -58,14 +58,13 @@ type (
 	}
 )
 
-// DomainResp is the full domain response returned by create/get/edit/verify
-// operations. It is an alias for DomainDetails so callers access fields
-// directly without an extra embedding layer.
-type DomainResp = DomainDetails
-
 // ListDomains returns a paginated list of domains on the account.
-// count controls the page size and offset controls the starting position.
+// count controls the page size (must be between 1 and 500) and offset
+// controls the starting position.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
+	if count < 1 {
+		return nil, fmt.Errorf("postmark: count must be at least 1, got %d", count)
+	}
 	req, err := a.newRequest(http.MethodGet, "domains", nil)
 	if err != nil {
 		return nil, err
@@ -87,7 +86,7 @@ func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
 }
 
 // GetDomain fetches the domain identified by domainID.
-func (a *API) GetDomain(domainID int) (*DomainResp, error) {
+func (a *API) GetDomain(domainID int) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("domains/%d", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -96,7 +95,7 @@ func (a *API) GetDomain(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -104,7 +103,7 @@ func (a *API) GetDomain(domainID int) (*DomainResp, error) {
 }
 
 // CreateDomain creates a new domain with the settings in domainReq.
-func (a *API) CreateDomain(domainReq *CreateDomainReq) (*DomainResp, error) {
+func (a *API) CreateDomain(domainReq *CreateDomainReq) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodPost, "domains", domainReq)
 	if err != nil {
 		return nil, err
@@ -113,7 +112,7 @@ func (a *API) CreateDomain(domainReq *CreateDomainReq) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -121,7 +120,7 @@ func (a *API) CreateDomain(domainReq *CreateDomainReq) (*DomainResp, error) {
 }
 
 // EditDomain applies the changes in editReq to the domain identified by domainID.
-func (a *API) EditDomain(domainID int, editReq *EditDomainReq) (*DomainResp, error) {
+func (a *API) EditDomain(domainID int, editReq *EditDomainReq) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d", domainID), editReq)
 	if err != nil {
 		return nil, err
@@ -130,7 +129,7 @@ func (a *API) EditDomain(domainID int, editReq *EditDomainReq) (*DomainResp, err
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -155,7 +154,7 @@ func (a *API) DeleteDomain(domainID int) (*DeleteResp, error) {
 }
 
 // VerifyDomainDKIM triggers DKIM verification for the domain identified by domainID.
-func (a *API) VerifyDomainDKIM(domainID int) (*DomainResp, error) {
+func (a *API) VerifyDomainDKIM(domainID int) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyDkim", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -164,7 +163,7 @@ func (a *API) VerifyDomainDKIM(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -172,7 +171,7 @@ func (a *API) VerifyDomainDKIM(domainID int) (*DomainResp, error) {
 }
 
 // VerifyDomainReturnPath triggers Return-Path verification for the domain identified by domainID.
-func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
+func (a *API) VerifyDomainReturnPath(domainID int) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyReturnPath", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -181,7 +180,7 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
@@ -189,7 +188,7 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 }
 
 // RotateDomainDKIM rotates the DKIM key for the domain identified by domainID.
-func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
+func (a *API) RotateDomainDKIM(domainID int) (*DomainDetails, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotateDkim", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -198,7 +197,7 @@ func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var data DomainResp
+	var data DomainDetails
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
