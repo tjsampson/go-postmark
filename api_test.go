@@ -267,3 +267,45 @@ func TestUpdateServer_Success(t *testing.T) {
 		t.Errorf("Name = %q, want Renamed", got.Name)
 	}
 }
+
+// ---- Do / body-close -----------------------------------------------------------
+
+// trackingReadCloser is an io.ReadCloser that records whether Close was called.
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (t *trackingReadCloser) Close() error {
+	t.closed = true
+	return nil
+}
+
+// TestDo_BodyIsClosed verifies that Do closes the HTTP response body after
+// reading it, preventing connection leaks in the net/http transport pool.
+func TestDo_BodyIsClosed(t *testing.T) {
+	tracker := &trackingReadCloser{
+		Reader: strings.NewReader(`{}`),
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       tracker,
+		}, nil
+	})))
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.postmarkapp.com/servers/1", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	_, err = api.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error from Do: %v", err)
+	}
+
+	if !tracker.closed {
+		t.Error("expected resp.Body.Close() to be called, but it was not")
+	}
+}
