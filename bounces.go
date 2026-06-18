@@ -11,6 +11,8 @@ import (
 
 type (
 	// BounceResp represents a single bounce record returned by the Postmark API.
+	// Fields mirror the Postmark Bounce API response schema documented at
+	// https://postmarkapp.com/developer/api/bounce-api.
 	BounceResp struct {
 		ID            int64     `json:"ID"`
 		Type          string    `json:"Type"`
@@ -29,7 +31,6 @@ type (
 		Inactive      bool      `json:"Inactive"`
 		CanActivate   bool      `json:"CanActivate"`
 		Subject       string    `json:"Subject"`
-		Content       string    `json:"Content"`
 	}
 
 	// BounceCountByType holds the count of bounces for a specific bounce type.
@@ -49,22 +50,25 @@ type (
 
 	// GetBouncesParams holds the optional query parameters for GET /bounces.
 	//
-	// Offset sentinel: set Offset to -1 to omit the offset parameter from the
-	// query string entirely, leaving the Postmark API default (0) in effect.
-	// The zero value (Offset == 0) is treated as an explicit "start at the
-	// beginning" and will be sent as offset=0. This is consistent with
-	// Count, which uses > 0 to decide whether to send the parameter (0 is
-	// not a valid page size, so zero means "omit").
+	// All fields are optional. A nil pointer field (Offset, Inactive) means
+	// "omit this parameter from the query string". Use the helper [IntPtr] and
+	// [BoolPtr] functions, or take the address of a local variable, to set them.
+	//
+	// Count: a value of 0 (the zero value) omits the parameter; any value > 0
+	// is sent as the page size.
+	//
+	// Offset: nil means "omit", non-nil means "send this value". To request
+	// the first page explicitly, pass a pointer to 0. This is consistent with
+	// the Inactive field and avoids the ambiguity of an integer sentinel value.
 	GetBouncesParams struct {
 		// Count is the number of bounces to return per page.
 		// A value of 0 (the zero value) omits the parameter from the query
 		// string; any value > 0 is sent as-is.
 		Count int
 		// Offset is the zero-based starting index for pagination.
-		// The zero value (0) is sent as offset=0, explicitly requesting the
-		// first page. Set to -1 to omit the parameter entirely and rely on
-		// the Postmark API default (which is also 0).
-		Offset          int
+		// A nil pointer omits the parameter (Postmark defaults to 0).
+		// A non-nil pointer sends the pointed-to value, including 0.
+		Offset          *int
 		Type            string
 		Inactive        *bool
 		EmailFilter     string
@@ -98,11 +102,11 @@ type (
 // It replaces the X-Postmark-Account-Token set by newRequest with the
 // correct server-level token header.
 //
-// Note: the API struct holds a single token field (a.token) that is
-// populated by APITokenOpt. For server-level endpoints this same value is
-// used as the server token. If a future revision of this package needs to
-// distinguish separate account-level and server-level credentials, a
-// dedicated serverToken field should be added to the API struct.
+// Token usage: the API struct holds a single token field (a.token) populated
+// by [APITokenOpt]. For bounce/server-level endpoints this value must be a
+// Postmark *server* API token (found in the Postmark UI under
+// Server → API Credentials). Using an account-level token here will result
+// in 401 Unauthorized responses from the Postmark API.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
@@ -140,22 +144,20 @@ func (a *API) GetDeliveryStats() (*DeliveryStatsResp, error) {
 // Pass nil for params to omit all query parameters and use the Postmark API
 // defaults.
 //
-// For Count: a value of 0 (the zero value) omits the parameter; any value > 0
-// is sent as the page size.
+// Count: a value of 0 omits the parameter; any value > 0 is sent as the page
+// size.
 //
-// For Offset: the zero value (0) is sent as offset=0, explicitly requesting
-// the first page. Set Offset to -1 to omit the parameter entirely.
+// Offset: a nil pointer omits the parameter (Postmark defaults to 0). A
+// non-nil pointer sends the pointed-to value, including 0 to explicitly
+// request the first page.
 func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 	q := url.Values{}
 	if params != nil {
 		if params.Count > 0 {
 			q.Set("count", strconv.Itoa(params.Count))
 		}
-		// Offset uses -1 as the "omit" sentinel. Any value >= 0 is sent
-		// as-is so callers can explicitly request offset=0 when starting
-		// at the first page or resetting pagination.
-		if params.Offset >= 0 {
-			q.Set("offset", strconv.Itoa(params.Offset))
+		if params.Offset != nil {
+			q.Set("offset", strconv.Itoa(*params.Offset))
 		}
 		if params.Type != "" {
 			q.Set("type", params.Type)
@@ -190,10 +192,8 @@ func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 	// Set the query string on the already-parsed URL so that the path
 	// segment ("bounces") and the query string remain cleanly separated,
 	// rather than embedding a literal '?' in the path string passed to
-	// newRequest.
-	if len(q) > 0 {
-		req.URL.RawQuery = q.Encode()
-	}
+	// newRequest. Setting an empty string is equivalent to no query string.
+	req.URL.RawQuery = q.Encode()
 
 	resp, err := a.Do(req)
 	if err != nil {

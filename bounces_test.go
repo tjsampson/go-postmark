@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// intPtr is a test helper that returns a pointer to the given int value,
+// making it convenient to set GetBouncesParams.Offset inline.
+func intPtr(v int) *int { return &v }
+
 // ---- GetDeliveryStats ----------------------------------------------------------
 
 func TestGetDeliveryStats_Success(t *testing.T) {
@@ -57,7 +61,7 @@ func TestGetDeliveryStats_Success(t *testing.T) {
 }
 
 // TestGetDeliveryStats_APIError verifies that a non-2xx response causes
-// GetDeliveryStats to return a non-nil error that wraps a PostmarkErr value
+// GetDeliveryStats to return a non-nil error that wraps a *PostmarkErr value
 // with the expected ErrorCode.
 func TestGetDeliveryStats_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
@@ -73,10 +77,12 @@ func TestGetDeliveryStats_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	// The error must be (or wrap) a PostmarkErr — not merely any error.
-	var pe PostmarkErr
+	// errors.As requires the target to be a pointer to the concrete error type.
+	// readResponse returns *PostmarkErr for non-sentinel errors, so pe must be
+	// declared as *PostmarkErr and &pe is **PostmarkErr.
+	var pe *PostmarkErr
 	if !errors.As(err, &pe) {
-		t.Errorf("expected error to be PostmarkErr, got %T: %v", err, err)
+		t.Errorf("expected error to be *PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -186,7 +192,7 @@ func TestGetBounces_WithParams(t *testing.T) {
 
 	params := &GetBouncesParams{
 		Count:           10,
-		Offset:          5,
+		Offset:          intPtr(5),
 		Type:            "HardBounce",
 		Inactive:        &inactive,
 		EmailFilter:     "test",
@@ -206,17 +212,15 @@ func TestGetBounces_WithParams(t *testing.T) {
 	}
 }
 
-// TestGetBounces_OffsetZero documents that the zero value of Offset (0)
-// is sent as offset=0 in the query string. This allows callers to explicitly
-// request the first page and distinguishes "use the default" (Offset: -1)
-// from "start at the beginning" (Offset: 0).
+// TestGetBounces_OffsetZero verifies that a non-nil Offset pointer pointing to
+// 0 sends offset=0 in the query string, explicitly requesting the first page.
 func TestGetBounces_OffsetZero(t *testing.T) {
 	want := GetBouncesResp{TotalCount: 1, Bounces: []BounceResp{{ID: 1}}}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		q := req.URL.RawQuery
 		if !strings.Contains(q, "offset=0") {
-			t.Errorf("expected offset=0 in query when Offset=0, got %q", q)
+			t.Errorf("expected offset=0 in query when Offset=intPtr(0), got %q", q)
 		}
 		// Verify query is in RawQuery, not embedded in the path.
 		if strings.Contains(req.URL.Path, "?") {
@@ -228,7 +232,7 @@ func TestGetBounces_OffsetZero(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: 0})
+	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: intPtr(0)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,15 +241,15 @@ func TestGetBounces_OffsetZero(t *testing.T) {
 	}
 }
 
-// TestGetBounces_OffsetOmitted documents that setting Offset to -1 omits the
-// offset parameter from the query string entirely, leaving the API default in effect.
-func TestGetBounces_OffsetOmitted(t *testing.T) {
+// TestGetBounces_OffsetNil verifies that a nil Offset pointer omits the offset
+// parameter from the query string entirely, leaving the API default in effect.
+func TestGetBounces_OffsetNil(t *testing.T) {
 	want := GetBouncesResp{TotalCount: 1, Bounces: []BounceResp{{ID: 1}}}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		q := req.URL.RawQuery
 		if strings.Contains(q, "offset=") {
-			t.Errorf("expected offset to be absent from query when Offset=-1, got %q", q)
+			t.Errorf("expected offset to be absent from query when Offset=nil, got %q", q)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -253,7 +257,7 @@ func TestGetBounces_OffsetOmitted(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: -1})
+	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: nil})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,7 +291,7 @@ func TestGetBounces_InactiveFalse(t *testing.T) {
 }
 
 // TestGetBounces_APIError verifies that a non-2xx response causes GetBounces
-// to return a non-nil PostmarkErr.
+// to return a non-nil *PostmarkErr.
 func TestGetBounces_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -302,9 +306,9 @@ func TestGetBounces_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	var pe PostmarkErr
+	var pe *PostmarkErr
 	if !errors.As(err, &pe) {
-		t.Errorf("expected error to be PostmarkErr, got %T: %v", err, err)
+		t.Errorf("expected error to be *PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -330,7 +334,6 @@ func TestGetBounce_Success(t *testing.T) {
 		Inactive:      true,
 		CanActivate:   true,
 		Subject:       "Test Subject",
-		Content:       "<html>test</html>",
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
