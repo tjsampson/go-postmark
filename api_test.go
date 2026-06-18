@@ -231,7 +231,7 @@ func TestListServers_Success(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListServers("10", "0")
+	got, err := api.ListServers(10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
