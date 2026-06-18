@@ -37,6 +37,20 @@ func TestNewServerRequest_SetsServerTokenHeader(t *testing.T) {
 	}
 }
 
+// TestNewServerRequest_EmptyTokenReturnsError verifies that newServerRequest
+// returns an error immediately when no server token has been configured, rather
+// than silently sending an unauthenticated request to Postmark.
+func TestNewServerRequest_EmptyTokenReturnsError(t *testing.T) {
+	api := New() // no ServerTokenOpt
+	_, err := api.newServerRequest(http.MethodPost, "email", nil)
+	if err == nil {
+		t.Fatal("expected an error when serverToken is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "serverToken is not set") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 // TestNewRequest_SetsAccountTokenHeader is the inverse of the above: newRequest
 // must set X-Postmark-Account-Token and must NOT set X-Postmark-Server-Token.
 // This guards against regressions from the buildRequest refactor.
@@ -121,6 +135,19 @@ func TestSendEmail_APIError(t *testing.T) {
 	}
 }
 
+// TestSendEmail_EmptyServerToken verifies that SendEmail returns an error (not
+// a silent 401 from Postmark) when no server token has been configured.
+func TestSendEmail_EmptyServerToken(t *testing.T) {
+	api := New() // no ServerTokenOpt
+	_, err := api.SendEmail(&SendEmailReq{From: "f@example.com", To: "t@example.com"})
+	if err == nil {
+		t.Fatal("expected an error when serverToken is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "serverToken is not set") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 func TestSendEmail_WithMetadataAndHeaders(t *testing.T) {
 	want := SendEmailResp{
 		To:        "to@example.com",
@@ -155,7 +182,7 @@ func TestSendEmail_WithMetadataAndHeaders(t *testing.T) {
 			{Name: "file.txt", Content: "aGVsbG8=", ContentType: "text/plain"},
 		},
 		TrackOpens: boolPtr(true),
-		TrackLinks: "None",
+		TrackLinks: TrackLinksNone,
 	}
 
 	_, err := api.SendEmail(emailReq)
@@ -208,6 +235,57 @@ func TestSendEmail_TrackOpensFalseIsSerialised(t *testing.T) {
 	}
 	if v != false {
 		t.Errorf("TrackOpens = %v, want false", v)
+	}
+}
+
+// TestSendEmail_TrackLinksValue verifies that the TrackLinksValue typed constant
+// is correctly serialised in the JSON payload.
+func TestSendEmail_TrackLinksValue(t *testing.T) {
+	tests := []struct {
+		name       string
+		trackLinks TrackLinksValue
+		wantJSON   string
+	}{
+		{"None", TrackLinksNone, "None"},
+		{"HtmlAndText", TrackLinksHtmlAndText, "HtmlAndText"},
+		{"HtmlOnly", TrackLinksHtmlOnly, "HtmlOnly"},
+		{"TextOnly", TrackLinksTextOnly, "TextOnly"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedBody map[string]any
+
+			api := New(
+				ServerTokenOpt("srv-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+						t.Fatalf("failed to decode request body: %v", err)
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, SendEmailResp{}),
+					}, nil
+				})),
+			)
+
+			_, err := api.SendEmail(&SendEmailReq{
+				From:       "f@example.com",
+				To:         "t@example.com",
+				TrackLinks: tc.trackLinks,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			v, ok := capturedBody["TrackLinks"]
+			if !ok {
+				t.Fatalf("TrackLinks key is missing from JSON payload")
+			}
+			if v != tc.wantJSON {
+				t.Errorf("TrackLinks = %q, want %q", v, tc.wantJSON)
+			}
+		})
 	}
 }
 
@@ -515,5 +593,54 @@ func TestSendEmailBatchWithTemplates_MissingTemplate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "TemplateID") || !strings.Contains(err.Error(), "TemplateAlias") {
 		t.Errorf("error message should mention TemplateID and TemplateAlias, got: %v", err)
+	}
+}
+
+// TestSendEmailBatchWithTemplates_NilRequest verifies that a nil batchReq is
+// handled gracefully and returns an error rather than panicking.
+func TestSendEmailBatchWithTemplates_NilRequest(t *testing.T) {
+	api := New(ServerTokenOpt("srv-token"))
+	_, err := api.SendEmailBatchWithTemplates(nil)
+	if err == nil {
+		t.Fatal("expected an error for nil batchReq, got nil")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("error message should mention nil, got: %v", err)
+	}
+}
+
+// TestSendBatchWithTemplatesResp_Deserialisation verifies that the response
+// envelope for POST /email/batchWithTemplates is correctly deserialised.
+// The Postmark API returns {"TotalCount":N,"Messages":[...]} — there is no
+// top-level Errors array; per-message errors are reported inside each Messages
+// entry via ErrorCode and Message fields.
+func TestSendBatchWithTemplatesResp_Deserialisation(t *testing.T) {
+	raw := `{
+		"TotalCount": 2,
+		"Messages": [
+			{"To": "a@example.com", "MessageID": "id-1", "ErrorCode": 0, "Message": "OK"},
+			{"To": "b@example.com", "MessageID": "",     "ErrorCode": 406, "Message": "You tried to send to a recipient that has been marked as inactive."}
+		]
+	}`
+
+	var resp SendBatchWithTemplatesResp
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if resp.TotalCount != 2 {
+		t.Errorf("TotalCount = %d, want 2", resp.TotalCount)
+	}
+	if len(resp.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(resp.Messages))
+	}
+	if resp.Messages[0].ErrorCode != 0 {
+		t.Errorf("Messages[0].ErrorCode = %d, want 0", resp.Messages[0].ErrorCode)
+	}
+	if resp.Messages[1].ErrorCode != 406 {
+		t.Errorf("Messages[1].ErrorCode = %d, want 406", resp.Messages[1].ErrorCode)
+	}
+	if resp.Messages[1].Message != "You tried to send to a recipient that has been marked as inactive." {
+		t.Errorf("Messages[1].Message = %q", resp.Messages[1].Message)
 	}
 }

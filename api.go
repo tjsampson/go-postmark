@@ -99,11 +99,18 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 // (X-Postmark-Server-Token). It is used for email-sending endpoints which
 // require a server-scoped token rather than an account-scoped token.
 //
-// NOTE: if serverToken is empty (i.e. ServerTokenOpt was never called or was
-// called with ""), the header will be sent with an empty value and Postmark
-// will reject the request with an authentication error. Use ServerTokenOpt to
-// supply a non-empty token before calling any SendEmail* method.
+// An error is returned if serverToken is empty — a misconfigured client would
+// otherwise silently send an unauthenticated request and receive a 401 from
+// Postmark. Use ServerTokenOpt to supply a non-empty token before calling any
+// SendEmail* method.
+//
+// Note: buildRequest intentionally sets no authentication header. Only
+// newRequest (account token) and newServerRequest (server token) add auth.
+// Do not call buildRequest directly for authenticated endpoints.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	if a.serverToken == "" {
+		return nil, fmt.Errorf("serverToken is not set: use ServerTokenOpt to configure a server token before calling SendEmail* methods")
+	}
 	req, err := a.buildRequest(method, path, body)
 	if err != nil {
 		return nil, err

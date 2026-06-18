@@ -6,6 +6,23 @@ import (
 	"net/http"
 )
 
+// TrackLinksValue is the set of valid values for the TrackLinks field.
+// Postmark only accepts these four values; any other string will result in
+// an API error. Using this type and its constants prevents invalid values
+// from being set silently.
+type TrackLinksValue string
+
+const (
+	// TrackLinksNone disables link tracking entirely.
+	TrackLinksNone TrackLinksValue = "None"
+	// TrackLinksHtmlAndText enables link tracking in both HTML and plain-text parts.
+	TrackLinksHtmlAndText TrackLinksValue = "HtmlAndText"
+	// TrackLinksHtmlOnly enables link tracking in the HTML part only.
+	TrackLinksHtmlOnly TrackLinksValue = "HtmlOnly"
+	// TrackLinksTextOnly enables link tracking in the plain-text part only.
+	TrackLinksTextOnly TrackLinksValue = "TextOnly"
+)
+
 type (
 	// MailHeader represents a custom email header as a name/value pair.
 	MailHeader struct {
@@ -29,6 +46,10 @@ type (
 	// {"TrackOpens":false} rather than being omitted from the JSON payload.
 	// A nil value causes the field to be omitted, which lets the message-stream
 	// default take effect — the same behaviour as not setting the field at all.
+	//
+	// TrackLinks must be one of the TrackLinksValue constants (None, HtmlAndText,
+	// HtmlOnly, TextOnly). An unrecognised value will be rejected by the Postmark
+	// API with an error at send time.
 	SendEmailReq struct {
 		From          string            `json:"From"`
 		To            string            `json:"To"`
@@ -43,12 +64,17 @@ type (
 		Headers       []MailHeader      `json:"Headers,omitempty"`
 		Attachments   []Attachment      `json:"Attachments,omitempty"`
 		TrackOpens    *bool             `json:"TrackOpens,omitempty"`
-		TrackLinks    string            `json:"TrackLinks,omitempty"`
+		TrackLinks    TrackLinksValue   `json:"TrackLinks,omitempty"`
 		MessageStream string            `json:"MessageStream,omitempty"`
 	}
 
 	// SendEmailResp is the response returned by POST /email and the individual
 	// items within a POST /email/batch response array.
+	//
+	// SubmittedAt is a raw string containing the RFC 3339 timestamp returned by
+	// Postmark. It is intentionally kept as a string to avoid a custom time.Time
+	// unmarshaller; callers who need to compare or sort by time should parse it
+	// with time.Parse(time.RFC3339, resp.SubmittedAt).
 	SendEmailResp struct {
 		To          string `json:"To"`
 		SubmittedAt string `json:"SubmittedAt"`
@@ -66,6 +92,8 @@ type (
 	//
 	// InlineCss is a *bool so that an explicit false is serialised correctly
 	// (see SendEmailReq.TrackOpens for the full rationale).
+	//
+	// TrackLinks must be one of the TrackLinksValue constants (see SendEmailReq.TrackLinks).
 	TemplateMessage struct {
 		From          string            `json:"From"`
 		To            string            `json:"To"`
@@ -77,7 +105,7 @@ type (
 		Headers       []MailHeader      `json:"Headers,omitempty"`
 		Attachments   []Attachment      `json:"Attachments,omitempty"`
 		TrackOpens    *bool             `json:"TrackOpens,omitempty"`
-		TrackLinks    string            `json:"TrackLinks,omitempty"`
+		TrackLinks    TrackLinksValue   `json:"TrackLinks,omitempty"`
 		MessageStream string            `json:"MessageStream,omitempty"`
 		// Template identification — supply either TemplateID or TemplateAlias.
 		TemplateID    int64          `json:"TemplateId,omitempty"`
@@ -92,21 +120,13 @@ type (
 	}
 
 	// SendBatchWithTemplatesResp is the response envelope for POST /email/batchWithTemplates.
-	//
-	// Errors contains batch-level validation errors that prevent individual
-	// messages from being submitted (distinct from per-message ErrorCode values
-	// reported inside each Messages entry). BatchEmailErr captures the ErrorCode
-	// and Message fields that Postmark returns for each such failure.
+	// The Postmark API returns {"TotalCount":N,"Messages":[...]} where each message
+	// carries its own ErrorCode and Message fields for per-message failures. There is
+	// no separate top-level errors array; all error information is embedded within the
+	// individual Messages entries.
 	SendBatchWithTemplatesResp struct {
-		TotalCount int             `json:"TotalCount"`
-		Errors     []BatchEmailErr `json:"Errors"`
+		TotalCount int              `json:"TotalCount"`
 		Messages   []*SendEmailResp `json:"Messages"`
-	}
-
-	// BatchEmailErr describes a single per-message error returned within a batch response.
-	BatchEmailErr struct {
-		ErrorCode int    `json:"ErrorCode"`
-		Message   string `json:"Message"`
 	}
 )
 
@@ -168,10 +188,14 @@ func (a *API) SendEmailBatch(reqs []*SendEmailReq) ([]*SendEmailResp, error) {
 // Postmark template by ID or alias and supply the corresponding model.
 //
 // An error is returned if:
+//   - batchReq is nil,
 //   - the batch is empty,
 //   - the batch exceeds the Postmark limit of 500 messages, or
 //   - any message omits both TemplateID and TemplateAlias.
 func (a *API) SendEmailBatchWithTemplates(batchReq *SendBatchWithTemplatesReq) (*SendBatchWithTemplatesResp, error) {
+	if batchReq == nil {
+		return nil, fmt.Errorf("batchReq must not be nil")
+	}
 	if len(batchReq.Messages) == 0 {
 		return nil, fmt.Errorf("batch must contain at least one message")
 	}
