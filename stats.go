@@ -17,24 +17,24 @@ type (
 
 	// OutboundStatsResp represents the response from GET /stats/outbound.
 	OutboundStatsResp struct {
-		Sent              int     `json:"Sent"`
-		Bounced           int     `json:"Bounced"`
-		SMTPApiErrors     int     `json:"SMTPApiErrors"`
-		BounceRate        float64 `json:"BounceRate"`
-		SpamComplaints    int     `json:"SpamComplaints"`
-		SpamComplaintsRate float64 `json:"SpamComplaintsRate"`
-		Opens             int     `json:"Opens"`
-		UniqueOpens       int     `json:"UniqueOpens"`
-		Tracked           int     `json:"Tracked"`
-		WithClientRecorded int    `json:"WithClientRecorded"`
-		WithPlatformRecorded int  `json:"WithPlatformRecorded"`
-		WithReadTimeRecorded int  `json:"WithReadTimeRecorded"`
+		Sent                 int     `json:"Sent"`
+		Bounced              int     `json:"Bounced"`
+		SMTPApiErrors        int     `json:"SMTPApiErrors"`
+		BounceRate           float64 `json:"BounceRate"`
+		SpamComplaints       int     `json:"SpamComplaints"`
+		SpamComplaintsRate   float64 `json:"SpamComplaintsRate"`
+		Opens                int     `json:"Opens"`
+		UniqueOpens          int     `json:"UniqueOpens"`
+		Tracked              int     `json:"Tracked"`
+		WithClientRecorded   int     `json:"WithClientRecorded"`
+		WithPlatformRecorded int     `json:"WithPlatformRecorded"`
+		WithReadTimeRecorded int     `json:"WithReadTimeRecorded"`
 	}
 
 	// SendCountsResp represents the response from GET /stats/outbound/sends.
 	SendCountsResp struct {
-		Days  []DayStat `json:"Days"`
-		Sent  int       `json:"Sent"`
+		Days []DayStat `json:"Days"`
+		Sent int       `json:"Sent"`
 	}
 
 	// DayStat represents stats for a single day.
@@ -45,11 +45,11 @@ type (
 
 	// BounceCountsResp represents the response from GET /stats/outbound/bounces.
 	BounceCountsResp struct {
-		Days              []BounceDay `json:"Days"`
-		HardBounce        int         `json:"HardBounce"`
-		SoftBounce        int         `json:"SoftBounce"`
-		SMTPApiError      int         `json:"SMTPApiError"`
-		Transient         int         `json:"Transient"`
+		Days         []BounceDay `json:"Days"`
+		HardBounce   int         `json:"HardBounce"`
+		SoftBounce   int         `json:"SoftBounce"`
+		SMTPApiError int         `json:"SMTPApiError"`
+		Transient    int         `json:"Transient"`
 	}
 
 	// BounceDay represents bounce stats for a single day.
@@ -63,8 +63,8 @@ type (
 
 	// SpamCountsResp represents the response from GET /stats/outbound/spam.
 	SpamCountsResp struct {
-		Days         []SpamDay `json:"Days"`
-		SpamComplaint int      `json:"SpamComplaint"`
+		Days          []SpamDay `json:"Days"`
+		SpamComplaint int       `json:"SpamComplaint"`
 	}
 
 	// SpamDay represents spam complaint stats for a single day.
@@ -101,11 +101,11 @@ type (
 
 	// OpenPlatformsResp represents the response from GET /stats/outbound/opens/platforms.
 	OpenPlatformsResp struct {
-		Days     []PlatformDay `json:"Days"`
-		Desktop  int           `json:"Desktop"`
-		Mobile   int           `json:"Mobile"`
-		Unknown  int           `json:"Unknown"`
-		WebMail  int           `json:"WebMail"`
+		Days    []PlatformDay `json:"Days"`
+		Desktop int           `json:"Desktop"`
+		Mobile  int           `json:"Mobile"`
+		Unknown int           `json:"Unknown"`
+		WebMail int           `json:"WebMail"`
 	}
 
 	// PlatformDay represents platform open stats for a single day.
@@ -119,10 +119,10 @@ type (
 
 	// EmailClientUsage represents usage stats for a single email client.
 	EmailClientUsage struct {
-		Name           string  `json:"Name"`
-		CompanyName    string  `json:"CompanyName"`
-		Family         string  `json:"Family"`
-		Version        string  `json:"Version"`
+		Name              string  `json:"Name"`
+		CompanyName       string  `json:"CompanyName"`
+		Family            string  `json:"Family"`
+		Version           string  `json:"Version"`
 		PercentageOfOpens float64 `json:"PercentageOfOpens"`
 	}
 

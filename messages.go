@@ -61,39 +61,39 @@ type (
 
 	// InboundMessageSearchParams holds query parameters for searching inbound messages.
 	InboundMessageSearchParams struct {
-		Count          int
-		Offset         int
-		Recipient      string
-		FromEmail      string
-		Tag            string
-		Status         string
-		FromDate       string
-		ToDate         string
-		InboxID        string
-		Subject        string
-		MailboxHash    string
-		MessageStream  string
+		Count         int
+		Offset        int
+		Recipient     string
+		FromEmail     string
+		Tag           string
+		Status        string
+		FromDate      string
+		ToDate        string
+		InboxID       string
+		Subject       string
+		MailboxHash   string
+		MessageStream string
 	}
 
 	// OutboundMessageSummary represents a summary of an outbound message.
 	OutboundMessageSummary struct {
-		TextBody      string   `json:"TextBody"`
-		HTMLBody      string   `json:"HtmlBody"`
-		Body          string   `json:"Body"`
-		Tag           string   `json:"Tag"`
-		MessageID     string   `json:"MessageID"`
-		To            []To     `json:"To"`
-		CC            []To     `json:"Cc"`
-		BCC           []To     `json:"Bcc"`
-		Recipients    []string `json:"Recipients"`
-		ReceivedAt    string   `json:"ReceivedAt"`
-		From          string   `json:"From"`
-		Subject       string   `json:"Subject"`
-		Attachments   []string `json:"Attachments"`
-		Status        string   `json:"Status"`
-		TrackOpens    bool     `json:"TrackOpens"`
-		TrackLinks    string   `json:"TrackLinks"`
-		MessageStream string   `json:"MessageStream"`
+		TextBody      string            `json:"TextBody"`
+		HTMLBody      string            `json:"HtmlBody"`
+		Body          string            `json:"Body"`
+		Tag           string            `json:"Tag"`
+		MessageID     string            `json:"MessageID"`
+		To            []To              `json:"To"`
+		CC            []To              `json:"Cc"`
+		BCC           []To              `json:"Bcc"`
+		Recipients    []string          `json:"Recipients"`
+		ReceivedAt    string            `json:"ReceivedAt"`
+		From          string            `json:"From"`
+		Subject       string            `json:"Subject"`
+		Attachments   []string          `json:"Attachments"`
+		Status        string            `json:"Status"`
+		TrackOpens    bool              `json:"TrackOpens"`
+		TrackLinks    string            `json:"TrackLinks"`
+		MessageStream string            `json:"MessageStream"`
 		Metadata      map[string]string `json:"Metadata"`
 	}
 
@@ -111,33 +111,33 @@ type (
 
 	// DeliveryEvent represents a delivery event for a message.
 	DeliveryEvent struct {
-		Recipient   string `json:"Recipient"`
-		Type        string `json:"Type"`
-		ReceivedAt  string `json:"ReceivedAt"`
-		Details     string `json:"Details"`
+		Recipient  string `json:"Recipient"`
+		Type       string `json:"Type"`
+		ReceivedAt string `json:"ReceivedAt"`
+		Details    string `json:"Details"`
 	}
 
 	// OutboundMessageDetailsResp represents the full details of an outbound message.
 	OutboundMessageDetailsResp struct {
-		TextBody        string          `json:"TextBody"`
-		HTMLBody        string          `json:"HtmlBody"`
-		Body            string          `json:"Body"`
-		Tag             string          `json:"Tag"`
-		MessageID       string          `json:"MessageID"`
-		To              []To            `json:"To"`
-		CC              []To            `json:"Cc"`
-		BCC             []To            `json:"Bcc"`
-		Recipients      []string        `json:"Recipients"`
-		ReceivedAt      string          `json:"ReceivedAt"`
-		From            string          `json:"From"`
-		Subject         string          `json:"Subject"`
-		Attachments     []string        `json:"Attachments"`
-		Status          string          `json:"Status"`
-		TrackOpens      bool            `json:"TrackOpens"`
-		TrackLinks      string          `json:"TrackLinks"`
-		MessageStream   string          `json:"MessageStream"`
-		Metadata        map[string]string `json:"Metadata"`
-		MessageEvents   []DeliveryEvent `json:"MessageEvents"`
+		TextBody      string            `json:"TextBody"`
+		HTMLBody      string            `json:"HtmlBody"`
+		Body          string            `json:"Body"`
+		Tag           string            `json:"Tag"`
+		MessageID     string            `json:"MessageID"`
+		To            []To              `json:"To"`
+		CC            []To              `json:"Cc"`
+		BCC           []To              `json:"Bcc"`
+		Recipients    []string          `json:"Recipients"`
+		ReceivedAt    string            `json:"ReceivedAt"`
+		From          string            `json:"From"`
+		Subject       string            `json:"Subject"`
+		Attachments   []string          `json:"Attachments"`
+		Status        string            `json:"Status"`
+		TrackOpens    bool              `json:"TrackOpens"`
+		TrackLinks    string            `json:"TrackLinks"`
+		MessageStream string            `json:"MessageStream"`
+		Metadata      map[string]string `json:"Metadata"`
+		MessageEvents []DeliveryEvent   `json:"MessageEvents"`
 	}
 
 	// MessageDumpResp represents the raw email dump for a message.
@@ -188,8 +188,8 @@ type (
 
 	// ListOutboundOpensResp is the response for listing outbound opens.
 	ListOutboundOpensResp struct {
-		TotalCount int          `json:"TotalCount"`
-		Opens      []OpenEvent  `json:"Opens"`
+		TotalCount int         `json:"TotalCount"`
+		Opens      []OpenEvent `json:"Opens"`
 	}
 
 	// ClickEvent represents a single click event.
@@ -208,33 +208,33 @@ type (
 
 	// ListOutboundClicksResp is the response for listing outbound clicks.
 	ListOutboundClicksResp struct {
-		TotalCount int           `json:"TotalCount"`
-		Clicks     []ClickEvent  `json:"Clicks"`
+		TotalCount int          `json:"TotalCount"`
+		Clicks     []ClickEvent `json:"Clicks"`
 	}
 
 	// InboundMessageSummary represents a summary of an inbound message.
 	InboundMessageSummary struct {
-		From          string   `json:"From"`
-		FromName      string   `json:"FromName"`
-		FromFull      To       `json:"FromFull"`
-		To            string   `json:"To"`
-		ToFull        []To     `json:"ToFull"`
-		CC            string   `json:"Cc"`
-		CCFull        []To     `json:"CcFull"`
-		BCC           string   `json:"Bcc"`
-		BCCFull       []To     `json:"BccFull"`
-		ReplyTo       string   `json:"ReplyTo"`
-		Subject       string   `json:"Subject"`
-		Date          string   `json:"Date"`
-		MailboxHash   string   `json:"MailboxHash"`
-		TextBody      string   `json:"TextBody"`
-		HTMLBody      string   `json:"HtmlBody"`
-		Tag           string   `json:"Tag"`
-		Headers       []Header `json:"Headers"`
+		From          string              `json:"From"`
+		FromName      string              `json:"FromName"`
+		FromFull      To                  `json:"FromFull"`
+		To            string              `json:"To"`
+		ToFull        []To                `json:"ToFull"`
+		CC            string              `json:"Cc"`
+		CCFull        []To                `json:"CcFull"`
+		BCC           string              `json:"Bcc"`
+		BCCFull       []To                `json:"BccFull"`
+		ReplyTo       string              `json:"ReplyTo"`
+		Subject       string              `json:"Subject"`
+		Date          string              `json:"Date"`
+		MailboxHash   string              `json:"MailboxHash"`
+		TextBody      string              `json:"TextBody"`
+		HTMLBody      string              `json:"HtmlBody"`
+		Tag           string              `json:"Tag"`
+		Headers       []Header            `json:"Headers"`
 		Attachments   []InboundAttachment `json:"Attachments"`
-		MessageID     string   `json:"MessageID"`
-		Status        string   `json:"Status"`
-		MessageStream string   `json:"MessageStream"`
+		MessageID     string              `json:"MessageID"`
+		Status        string              `json:"Status"`
+		MessageStream string              `json:"MessageStream"`
 	}
 
 	// Header represents an email header key-value pair.
@@ -253,33 +253,33 @@ type (
 
 	// ListInboundMessagesResp is the response for listing inbound messages.
 	ListInboundMessagesResp struct {
-		TotalCount       int                     `json:"TotalCount"`
-		InboundMessages  []InboundMessageSummary `json:"InboundMessages"`
+		TotalCount      int                     `json:"TotalCount"`
+		InboundMessages []InboundMessageSummary `json:"InboundMessages"`
 	}
 
 	// InboundMessageDetailsResp represents the full details of an inbound message.
 	InboundMessageDetailsResp struct {
-		From          string   `json:"From"`
-		FromName      string   `json:"FromName"`
-		FromFull      To       `json:"FromFull"`
-		To            string   `json:"To"`
-		ToFull        []To     `json:"ToFull"`
-		CC            string   `json:"Cc"`
-		CCFull        []To     `json:"CcFull"`
-		BCC           string   `json:"Bcc"`
-		BCCFull       []To     `json:"BccFull"`
-		ReplyTo       string   `json:"ReplyTo"`
-		Subject       string   `json:"Subject"`
-		Date          string   `json:"Date"`
-		MailboxHash   string   `json:"MailboxHash"`
-		TextBody      string   `json:"TextBody"`
-		HTMLBody      string   `json:"HtmlBody"`
-		Tag           string   `json:"Tag"`
-		Headers       []Header `json:"Headers"`
+		From          string              `json:"From"`
+		FromName      string              `json:"FromName"`
+		FromFull      To                  `json:"FromFull"`
+		To            string              `json:"To"`
+		ToFull        []To                `json:"ToFull"`
+		CC            string              `json:"Cc"`
+		CCFull        []To                `json:"CcFull"`
+		BCC           string              `json:"Bcc"`
+		BCCFull       []To                `json:"BccFull"`
+		ReplyTo       string              `json:"ReplyTo"`
+		Subject       string              `json:"Subject"`
+		Date          string              `json:"Date"`
+		MailboxHash   string              `json:"MailboxHash"`
+		TextBody      string              `json:"TextBody"`
+		HTMLBody      string              `json:"HtmlBody"`
+		Tag           string              `json:"Tag"`
+		Headers       []Header            `json:"Headers"`
 		Attachments   []InboundAttachment `json:"Attachments"`
-		MessageID     string   `json:"MessageID"`
-		Status        string   `json:"Status"`
-		MessageStream string   `json:"MessageStream"`
+		MessageID     string              `json:"MessageID"`
+		Status        string              `json:"Status"`
+		MessageStream string              `json:"MessageStream"`
 	}
 
 	// InboundBypassResp is the response from bypassing inbound message rules.
