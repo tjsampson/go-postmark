@@ -85,11 +85,17 @@ type (
 
 // ErrExists is returned when a create operation is rejected because a server
 // with the same name already exists (HTTP 409 Conflict).
-var ErrExists = NewError(http.StatusConflict, "server already exists")
+// Its ErrorCode is 0 because this sentinel is dispatched on the HTTP status
+// code (resp.StatusCode == 409), not on a Postmark application error code;
+// Postmark uses its own four-digit codes (e.g. 505 for duplicate server name)
+// in the JSON body which are unrelated to the HTTP status.
+var ErrExists = &PostmarkErr{ErrorCode: 0, Message: "server already exists"}
 
 // ErrNotFound is returned when the requested server does not exist (HTTP 404 Not Found).
 // Callers can detect this condition with errors.Is(err, postmark.ErrNotFound).
-var ErrNotFound = NewError(http.StatusNotFound, "server not found")
+// Its ErrorCode is 0 for the same reason as ErrExists: dispatch is keyed on
+// resp.StatusCode, not the Postmark application error code.
+var ErrNotFound = &PostmarkErr{ErrorCode: 0, Message: "server not found"}
 
 // Error implements the error interface for PostmarkErr.
 func (pe PostmarkErr) Error() string {
@@ -102,9 +108,9 @@ func (pe PostmarkErr) Code() int {
 }
 
 // Is reports whether pe matches target, enabling errors.Is comparisons.
-// Two PostmarkErr values are considered equal when their ErrorCode fields match,
-// so errors.Is(err, ErrNotFound) and errors.Is(err, ErrExists) work correctly
-// regardless of the Message text.
+// Sentinel errors (ErrExists, ErrNotFound) are matched by pointer identity
+// before this method is called, so this method handles structural equality
+// for non-sentinel PostmarkErr values returned from API responses.
 func (pe PostmarkErr) Is(target error) bool {
 	var t *PostmarkErr
 	switch v := target.(type) {

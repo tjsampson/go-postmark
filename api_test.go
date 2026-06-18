@@ -173,6 +173,40 @@ func TestCreateServer_APIError(t *testing.T) {
 	}
 }
 
+// TestCreateServer_Conflict asserts that a 409 Conflict response causes
+// CreateServer to return ErrExists, detectable via errors.Is, regardless of
+// the Postmark-specific ErrorCode in the response body. Postmark uses its own
+// four-digit application error codes (e.g. 505 for duplicate server name) in
+// the JSON body — distinct from the HTTP 409 status — so dispatch must key
+// off resp.StatusCode, not the body's ErrorCode.
+func TestCreateServer_Conflict(t *testing.T) {
+	// ErrorCode 505 is the real Postmark application code for "duplicate server
+	// name". It is intentionally different from http.StatusConflict (409) to
+	// verify that the sentinel is triggered by the HTTP status, not the body code.
+	pmErr := PostmarkErr{ErrorCode: 505, Message: "A server with this name already exists."}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", req.Method)
+		}
+		if !strings.HasSuffix(req.URL.Path, "/servers") {
+			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusConflict,
+			Body:       jsonBody(t, pmErr),
+		}, nil
+	})))
+
+	_, err := api.CreateServer(&CreateServerReq{Name: "Duplicate Server"})
+	if err == nil {
+		t.Fatal("expected ErrExists, got nil")
+	}
+	if !errors.Is(err, ErrExists) {
+		t.Errorf("expected errors.Is(err, ErrExists) to be true, got err=%v", err)
+	}
+}
+
 // ---- ReadServer ----------------------------------------------------------------
 
 func TestReadServer_Success(t *testing.T) {
