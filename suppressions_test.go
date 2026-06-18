@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -69,14 +70,31 @@ func TestListSuppressions_WithParams(t *testing.T) {
 		if q.Get("Origin") != "Recipient" {
 			t.Errorf("expected Origin=Recipient in query, got: %s", req.URL.RawQuery)
 		}
-		// Verify that special characters in EmailAddress are properly URL-encoded.
-		// url.Values.Encode encodes '+' as %2B; Query().Get decodes it back.
+		// Verify that special characters in EmailAddress survive the round-trip.
+		// Use Query().Get() which percent-decodes the value, so the comparison is
+		// independent of how the Go runtime encodes '+' or '@'.
 		if q.Get("EmailAddress") != "user+tag@example.com" {
 			t.Errorf("expected EmailAddress=user+tag@example.com (decoded), got: %q", q.Get("EmailAddress"))
 		}
-		// Confirm the wire value actually contains the percent-encoded form.
-		if !strings.Contains(req.URL.RawQuery, "EmailAddress=user%2Btag%40example.com") {
-			t.Errorf("expected percent-encoded EmailAddress in raw query, got: %s", req.URL.RawQuery)
+		// Confirm that '+' is sent as %2B (not a literal '+', which would be
+		// misinterpreted as a space on decode). Decode the raw query ourselves
+		// so the assertion is not sensitive to whether '@' is encoded or not.
+		rawEmail := ""
+		for _, part := range strings.Split(req.URL.RawQuery, "&") {
+			if strings.HasPrefix(part, "EmailAddress=") {
+				rawEmail = strings.TrimPrefix(part, "EmailAddress=")
+				break
+			}
+		}
+		decoded, err := url.QueryUnescape(rawEmail)
+		if err != nil {
+			t.Fatalf("could not unescape raw EmailAddress %q: %v", rawEmail, err)
+		}
+		if decoded != "user+tag@example.com" {
+			t.Errorf("round-trip decoded EmailAddress = %q, want user+tag@example.com", decoded)
+		}
+		if strings.Contains(rawEmail, "+") {
+			t.Errorf("'+' must be percent-encoded as %%2B in wire form, got: %s", rawEmail)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -112,6 +130,36 @@ func TestListSuppressions_EmptyStreamID(t *testing.T) {
 	}
 }
 
+// TestListSuppressions_StreamIDPathEscape verifies that a streamID containing
+// characters that are special in URL paths (e.g. spaces) are properly
+// percent-encoded by url.PathEscape, so the path segment remains well-formed.
+// Note: http.NewRequest decodes percent-encoded sequences in URL.Path; the
+// encoded form is preserved in URL.EscapedPath() and URL.RequestURI().
+func TestListSuppressions_StreamIDPathEscape(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		// EscapedPath() returns the path with percent-encoding preserved, unlike
+		// URL.Path which Go decodes after parsing. A space must appear as %20 in
+		// the wire path, not as a literal space or as '+' (query-string encoding).
+		escapedPath := req.URL.EscapedPath()
+		if !strings.Contains(escapedPath, "/message-streams/my%20stream/suppressions/dump") {
+			t.Errorf("expected percent-encoded streamID in EscapedPath, got: %s", escapedPath)
+		}
+		// URL.Path will contain the decoded form; verify the streamID round-trips correctly.
+		if !strings.Contains(req.URL.Path, "/message-streams/my stream/suppressions/dump") {
+			t.Errorf("expected decoded streamID in Path, got: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListSuppressionsResp{}),
+		}, nil
+	})))
+
+	_, err := api.ListSuppressions("my stream", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestListSuppressions_APIError asserts that a non-2xx response returns a
 // PostmarkErr so callers can inspect the error code.
 func TestListSuppressions_APIError(t *testing.T) {
@@ -128,6 +176,8 @@ func TestListSuppressions_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	// PostmarkErr implements error with a value receiver and readResponse returns
+	// it as a value, so errors.As with a value target is the correct pattern here.
 	var pe PostmarkErr
 	if !errors.As(err, &pe) {
 		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)
@@ -221,6 +271,8 @@ func TestCreateSuppressions_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	// PostmarkErr implements error with a value receiver and readResponse returns
+	// it as a value, so errors.As with a value target is the correct pattern here.
 	var pe PostmarkErr
 	if !errors.As(err, &pe) {
 		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)
@@ -328,6 +380,8 @@ func TestDeleteSuppressions_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	// PostmarkErr implements error with a value receiver and readResponse returns
+	// it as a value, so errors.As with a value target is the correct pattern here.
 	var pe PostmarkErr
 	if !errors.As(err, &pe) {
 		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)

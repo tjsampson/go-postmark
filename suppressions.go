@@ -47,8 +47,10 @@ type (
 
 	// SuppressionResult represents the per-email result in a create or delete
 	// suppressions response. A single type is used for both operations because the
-	// Postmark API returns identical fields for each; if the API diverges in the
-	// future, dedicated types can be introduced at that point.
+	// Postmark API returns identical fields for each (verified against the Postmark
+	// Suppressions API documentation as of June 2025 — revisit if the API diverges).
+	// Create responses use Status values "Suppressed"/"Failed"; delete responses use
+	// "Deleted"/"Failed". Both share the same EmailAddress and optional Message fields.
 	SuppressionResult struct {
 		EmailAddress string `json:"EmailAddress"`
 		Status       string `json:"Status"`
