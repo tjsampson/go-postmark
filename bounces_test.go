@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---- GetDeliveryStats ----------------------------------------------------------
@@ -113,6 +114,9 @@ func TestGetBounces_WithParams(t *testing.T) {
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		q := req.URL.RawQuery
+		if q == "" {
+			t.Fatalf("expected non-empty query string, got empty; URL=%s", req.URL.String())
+		}
 		if !strings.Contains(q, "count=10") {
 			t.Errorf("expected count=10 in query, got %s", q)
 		}
@@ -171,6 +175,58 @@ func TestGetBounces_WithParams(t *testing.T) {
 	}
 }
 
+// TestGetBounces_OffsetZero documents that the zero value of Offset (0)
+// is sent as offset=0 in the query string. This allows callers to explicitly
+// request the first page and distinguishes "use the default" (Offset: -1)
+// from "start at the beginning" (Offset: 0).
+func TestGetBounces_OffsetZero(t *testing.T) {
+	want := GetBouncesResp{TotalCount: 1, Bounces: []BounceResp{{ID: 1}}}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.RawQuery
+		if !strings.Contains(q, "offset=0") {
+			t.Errorf("expected offset=0 in query when Offset=0, got %q", q)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, want),
+		}, nil
+	})))
+
+	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TotalCount != 1 {
+		t.Errorf("TotalCount = %d, want 1", got.TotalCount)
+	}
+}
+
+// TestGetBounces_OffsetOmitted documents that setting Offset to -1 omits the
+// offset parameter from the query string entirely, leaving the API default in effect.
+func TestGetBounces_OffsetOmitted(t *testing.T) {
+	want := GetBouncesResp{TotalCount: 1, Bounces: []BounceResp{{ID: 1}}}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.RawQuery
+		if strings.Contains(q, "offset=") {
+			t.Errorf("expected offset to be absent from query when Offset=-1, got %q", q)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, want),
+		}, nil
+	})))
+
+	got, err := api.GetBounces(&GetBouncesParams{Count: 10, Offset: -1})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TotalCount != 1 {
+		t.Errorf("TotalCount = %d, want 1", got.TotalCount)
+	}
+}
+
 func TestGetBounces_InactiveFalse(t *testing.T) {
 	want := GetBouncesResp{TotalCount: 1, Bounces: []BounceResp{{ID: 11}}}
 	inactive := false
@@ -214,6 +270,7 @@ func TestGetBounces_APIError(t *testing.T) {
 // ---- GetBounce -----------------------------------------------------------------
 
 func TestGetBounce_Success(t *testing.T) {
+	bouncedAt, _ := time.Parse(time.RFC3339, "2023-06-01T12:00:00Z")
 	want := BounceResp{
 		ID:            42,
 		Type:          "HardBounce",
@@ -227,7 +284,7 @@ func TestGetBounce_Success(t *testing.T) {
 		Details:       "smtp;550 5.1.1 The email account that you tried to reach does not exist",
 		Email:         "bounce@example.com",
 		From:          "sender@example.com",
-		BouncedAt:     "2023-06-01T12:00:00Z",
+		BouncedAt:     bouncedAt,
 		DumpAvailable: true,
 		Inactive:      true,
 		CanActivate:   true,
@@ -266,6 +323,9 @@ func TestGetBounce_Success(t *testing.T) {
 	}
 	if !got.CanActivate {
 		t.Error("expected CanActivate to be true")
+	}
+	if !got.BouncedAt.Equal(bouncedAt) {
+		t.Errorf("BouncedAt = %v, want %v", got.BouncedAt, bouncedAt)
 	}
 }
 
@@ -507,7 +567,8 @@ func TestGetBounceTags_APIError(t *testing.T) {
 // ---- Server Token Header -------------------------------------------------------
 
 // TestBounceAPI_UsesServerToken verifies that all Bounce API methods set the
-// X-Postmark-Server-Token header and do NOT set X-Postmark-Account-Token.
+// X-Postmark-Server-Token header to the exact configured token value and do NOT
+// set X-Postmark-Account-Token.
 func TestBounceAPI_UsesServerToken(t *testing.T) {
 	const token = "test-server-token"
 	checkHeaders := func(t *testing.T, req *http.Request) {

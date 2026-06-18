@@ -6,36 +6,39 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 type (
 	// BounceResp represents a single bounce record returned by the Postmark API.
 	BounceResp struct {
-		ID              int64   `json:"ID"`
-		Type            string  `json:"Type"`
-		TypeCode        int     `json:"TypeCode"`
-		Name            string  `json:"Name"`
-		Tag             string  `json:"Tag"`
-		MessageID       string  `json:"MessageID"`
-		ServerID        int64   `json:"ServerID"`
-		MessageStream   string  `json:"MessageStream"`
-		Description     string  `json:"Description"`
-		Details         string  `json:"Details"`
-		Email           string  `json:"Email"`
-		From            string  `json:"From"`
-		BouncedAt       string  `json:"BouncedAt"`
-		DumpAvailable   bool    `json:"DumpAvailable"`
-		Inactive        bool    `json:"Inactive"`
-		CanActivate     bool    `json:"CanActivate"`
-		Subject         string  `json:"Subject"`
-		Content         string  `json:"Content"`
+		ID            int64     `json:"ID"`
+		Type          string    `json:"Type"`
+		TypeCode      int       `json:"TypeCode"`
+		Name          string    `json:"Name"`
+		Tag           string    `json:"Tag"`
+		MessageID     string    `json:"MessageID"`
+		ServerID      int64     `json:"ServerID"`
+		MessageStream string    `json:"MessageStream"`
+		Description   string    `json:"Description"`
+		Details       string    `json:"Details"`
+		Email         string    `json:"Email"`
+		From          string    `json:"From"`
+		BouncedAt     time.Time `json:"BouncedAt"`
+		DumpAvailable bool      `json:"DumpAvailable"`
+		Inactive      bool      `json:"Inactive"`
+		CanActivate   bool      `json:"CanActivate"`
+		Subject       string    `json:"Subject"`
+		Content       string    `json:"Content"`
 	}
 
 	// BounceCountByType holds the count of bounces for a specific bounce type.
 	BounceCountByType struct {
 		Name  string `json:"Name"`
 		Count int    `json:"Count"`
-		Type  string `json:"Type"`
+		// Type is the machine-readable bounce type key (e.g. "HardBounce"),
+		// as distinct from Name which is the human-readable label.
+		Type string `json:"Type"`
 	}
 
 	// DeliveryStatsResp is the response from GET /deliverystats.
@@ -45,8 +48,15 @@ type (
 	}
 
 	// GetBouncesParams holds the optional query parameters for GET /bounces.
+	// Count and Offset use -1 as a sentinel meaning "omit from the query string
+	// and let the Postmark API apply its default". A value of 0 for either field
+	// is therefore treated as unset, not as an explicit zero. Callers who need to
+	// send offset=0 explicitly should leave Offset at its zero value and rely on
+	// the API default, or set Count without Offset.
 	GetBouncesParams struct {
-		Count           int
+		// Count is the number of bounces to return per page. Use -1 to omit.
+		Count int
+		// Offset is the zero-based starting index for pagination. Use -1 to omit.
 		Offset          int
 		Type            string
 		Inactive        *bool
@@ -78,12 +88,15 @@ type (
 
 // newServerRequest builds an *http.Request for the Bounce API using the
 // X-Postmark-Server-Token header required by server-level endpoints.
+// It replaces the X-Postmark-Account-Token set by newRequest with the
+// correct server-level token header.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
 		return nil, err
 	}
-	// The Bounce API requires a server token, not an account token.
+	// newRequest sets X-Postmark-Account-Token; remove it and set the
+	// server-level header instead so account credentials are not leaked.
 	req.Header.Del("X-Postmark-Account-Token")
 	req.Header.Set("X-Postmark-Server-Token", a.token)
 	return req, nil
@@ -110,13 +123,21 @@ func (a *API) GetDeliveryStats() (*DeliveryStatsResp, error) {
 
 // GetBounces returns a paginated list of bounces filtered by the supplied
 // params. It calls GET /bounces with the query parameters derived from params.
+//
+// For Count and Offset, set the field to -1 to omit it from the query string
+// entirely (leaving the Postmark API default in effect). The zero value (0)
+// is also treated as "omit" for both fields: 0 is not a valid Count, and
+// Postmark's default offset is 0 so an explicit offset=0 is redundant.
 func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 	q := url.Values{}
 	if params != nil {
 		if params.Count > 0 {
 			q.Set("count", strconv.Itoa(params.Count))
 		}
-		if params.Offset > 0 {
+		// Offset uses -1 as the "omit" sentinel. Any value >= 0 is sent
+		// as-is so callers can explicitly request offset=0 when resetting
+		// pagination after a previous non-zero offset.
+		if params.Offset >= 0 {
 			q.Set("offset", strconv.Itoa(params.Offset))
 		}
 		if params.Type != "" {
