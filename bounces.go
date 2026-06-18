@@ -81,30 +81,6 @@ type (
 	}
 )
 
-// serverToken returns the token that should be sent in X-Postmark-Server-Token.
-// It uses the explicitly configured server token when available, and falls back
-// to the account token so that callers who only supply APITokenOpt still work.
-func (a *API) effectiveServerToken() string {
-	if a.serverToken != "" {
-		return a.serverToken
-	}
-	return a.token
-}
-
-// newServerTokenRequest builds an *http.Request that carries
-// X-Postmark-Server-Token instead of X-Postmark-Account-Token.
-// Bounce and Delivery Stats endpoints require a server-scoped token.
-func (a *API) newServerTokenRequest(method, path string, body interface{}) (*http.Request, error) {
-	req, err := a.newRequest(method, path, body)
-	if err != nil {
-		return nil, err
-	}
-	// Replace the account-token header with the server token.
-	req.Header.Del("X-Postmark-Account-Token")
-	req.Header.Set("X-Postmark-Server-Token", a.effectiveServerToken())
-	return req, nil
-}
-
 // ListBounces retrieves a paginated list of bounces matching the supplied
 // parameters. Nil pointer fields in params are omitted from the query string;
 // use a pointer to the zero value to send an explicit 0 or false.

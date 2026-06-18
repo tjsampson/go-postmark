@@ -81,11 +81,12 @@ func New(options ...Option) *API {
 	return api
 }
 
-// newRequest builds an *http.Request for the given HTTP method and API path.
-// If body is non-nil it is JSON-encoded as the request body and Content-Type
-// is set to application/json. If body is nil, http.NoBody is used and no
-// Content-Type header is set.
-func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
+// newRequestWithAuthHeader is the single low-level request constructor.
+// It builds an *http.Request for method+path, JSON-encodes body when non-nil,
+// and sets exactly one authentication header — headerName: headerValue.
+// All other request construction (newRequest, newServerTokenRequest) delegates
+// here so that auth-header selection is centralised and not duplicated.
+func (a *API) newRequestWithAuthHeader(method, path, headerName, headerValue string, body interface{}) (*http.Request, error) {
 	var reqBody io.Reader = http.NoBody
 	hasBody := body != nil
 	if hasBody {
@@ -108,9 +109,35 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Postmark-Account-Token", a.token)
+	req.Header.Set(headerName, headerValue)
 
 	return req, nil
+}
+
+// newRequest builds an *http.Request that carries X-Postmark-Account-Token.
+// It is used for account-scoped endpoints (servers, etc.).
+func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
+	return a.newRequestWithAuthHeader(method, path, "X-Postmark-Account-Token", a.token, body)
+}
+
+// newServerTokenRequest builds an *http.Request that carries
+// X-Postmark-Server-Token. Bounce and Delivery Stats endpoints require a
+// server-scoped credential. It uses effectiveServerToken() so that callers
+// who only supply APITokenOpt (account token) still get a working credential
+// via the fallback.
+func (a *API) newServerTokenRequest(method, path string, body interface{}) (*http.Request, error) {
+	return a.newRequestWithAuthHeader(method, path, "X-Postmark-Server-Token", a.effectiveServerToken(), body)
+}
+
+// effectiveServerToken returns the token that should be sent in
+// X-Postmark-Server-Token. It uses the explicitly configured server token
+// when available, and falls back to the account token so that callers who
+// only supply APITokenOpt still work.
+func (a *API) effectiveServerToken() string {
+	if a.serverToken != "" {
+		return a.serverToken
+	}
+	return a.token
 }
 
 // Do executes an HTTP request and returns the wrapped response.
