@@ -9,11 +9,12 @@ import (
 
 func TestRequestDataRemoval(t *testing.T) {
 	tests := []struct {
-		name        string
-		req         *DataRemovalReq
-		wantID      int64
-		wantStatus  string
-		wantReqAt   string
+		name       string
+		req        *DataRemovalReq
+		wantID     int64
+		wantStatus string
+		wantReqAt  string
+		wantReqBy  string
 	}{
 		{
 			name:       "basic removal request",
@@ -21,6 +22,7 @@ func TestRequestDataRemoval(t *testing.T) {
 			wantID:     101,
 			wantStatus: "Pending",
 			wantReqAt:  "2024-01-15T12:00:00Z",
+			wantReqBy:  "admin@example.com",
 		},
 		{
 			name:       "removal with different emails",
@@ -28,6 +30,7 @@ func TestRequestDataRemoval(t *testing.T) {
 			wantID:     102,
 			wantStatus: "Pending",
 			wantReqAt:  "2024-01-15T00:00:00Z",
+			wantReqBy:  "gdpr@company.org",
 		},
 	}
 
@@ -40,6 +43,7 @@ func TestRequestDataRemoval(t *testing.T) {
 				EmailAddress: expectedEmail,
 				Status:       tc.wantStatus,
 				RequestedAt:  tc.wantReqAt,
+				RequestedBy:  tc.wantReqBy,
 			}
 
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -81,6 +85,9 @@ func TestRequestDataRemoval(t *testing.T) {
 			if got.RequestedAt != tc.wantReqAt {
 				t.Errorf("RequestedAt = %q, want %q", got.RequestedAt, tc.wantReqAt)
 			}
+			if got.RequestedBy != tc.wantReqBy {
+				t.Errorf("RequestedBy = %q, want %q", got.RequestedBy, tc.wantReqBy)
+			}
 		})
 	}
 }
@@ -99,8 +106,10 @@ func TestRequestDataRemoval_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, &wantErr) {
-		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	// errors.Is uses PostmarkErr.Is (value receiver) which matches by ErrorCode.
+	// Pass the value (not a pointer) so the comparison works correctly.
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected errors.Is(err, PostmarkErr{500}) to be true, got err=%v", err)
 	}
 }
 
@@ -110,6 +119,7 @@ func TestGetDataRemoval_Success(t *testing.T) {
 		EmailAddress: "remove@example.com",
 		Status:       "Completed",
 		RequestedAt:  "2024-01-10T08:30:00Z",
+		RequestedBy:  "admin@example.com",
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -137,6 +147,12 @@ func TestGetDataRemoval_Success(t *testing.T) {
 	}
 	if got.Status != "Completed" {
 		t.Errorf("Status = %q, want Completed", got.Status)
+	}
+	if got.RequestedAt != "2024-01-10T08:30:00Z" {
+		t.Errorf("RequestedAt = %q, want 2024-01-10T08:30:00Z", got.RequestedAt)
+	}
+	if got.RequestedBy != "admin@example.com" {
+		t.Errorf("RequestedBy = %q, want admin@example.com", got.RequestedBy)
 	}
 }
 
@@ -207,7 +223,9 @@ func TestGetDataRemoval_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, &wantErr) {
-		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	// errors.Is uses PostmarkErr.Is (value receiver) which matches by ErrorCode.
+	// Pass the value (not a pointer) so the comparison works correctly.
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected errors.Is(err, PostmarkErr{500}) to be true, got err=%v", err)
 	}
 }

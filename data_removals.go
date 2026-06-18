@@ -19,6 +19,7 @@ type (
 		EmailAddress string `json:"EmailAddress"`
 		Status       string `json:"Status"`
 		RequestedAt  string `json:"RequestedAt"`
+		RequestedBy  string `json:"RequestedBy"`
 	}
 )
 
@@ -29,9 +30,9 @@ func (a *API) RequestDataRemoval(req *DataRemovalReq) (*DataRemovalResp, error) 
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DataRemovalResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -47,9 +48,9 @@ func (a *API) GetDataRemoval(removalID int64) (*DataRemovalResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DataRemovalResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

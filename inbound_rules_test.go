@@ -101,8 +101,27 @@ func TestListInboundRules_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, &wantErr) {
-		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	// errors.Is uses PostmarkErr.Is (value receiver) which matches by ErrorCode.
+	// Pass the value (not a pointer) so the comparison works correctly.
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected errors.Is(err, PostmarkErr{500}) to be true, got err=%v", err)
+	}
+}
+
+func TestListInboundRules_NotFound(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "not found"}),
+		}, nil
+	})))
+
+	_, err := api.ListInboundRules(10, 0)
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
 	}
 }
 
@@ -192,8 +211,10 @@ func TestCreateInboundRule_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, &wantErr) {
-		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	// errors.Is uses PostmarkErr.Is (value receiver) which matches by ErrorCode.
+	// Pass the value (not a pointer) so the comparison works correctly.
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected errors.Is(err, PostmarkErr{500}) to be true, got err=%v", err)
 	}
 }
 
@@ -236,6 +257,27 @@ func TestDeleteInboundRule_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestDeleteInboundRule_APIError(t *testing.T) {
+	wantErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, wantErr),
+		}, nil
+	})))
+
+	_, err := api.DeleteInboundRule(42)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// errors.Is uses PostmarkErr.Is (value receiver) which matches by ErrorCode.
+	// Pass the value (not a pointer) so the comparison works correctly.
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected errors.Is(err, PostmarkErr{500}) to be true, got err=%v", err)
 	}
 }
 
