@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -56,6 +57,9 @@ func TestListSuppressions_Success(t *testing.T) {
 	}
 }
 
+// TestListSuppressions_WithParams verifies that query parameters are forwarded
+// correctly, including proper URL-encoding of special characters (e.g. '+' in
+// an email address that would otherwise be interpreted as a space).
 func TestListSuppressions_WithParams(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		q := req.URL.Query()
@@ -66,8 +70,13 @@ func TestListSuppressions_WithParams(t *testing.T) {
 			t.Errorf("expected Origin=Recipient in query, got: %s", req.URL.RawQuery)
 		}
 		// Verify that special characters in EmailAddress are properly URL-encoded.
+		// url.Values.Encode encodes '+' as %2B; Query().Get decodes it back.
 		if q.Get("EmailAddress") != "user+tag@example.com" {
 			t.Errorf("expected EmailAddress=user+tag@example.com (decoded), got: %q", q.Get("EmailAddress"))
+		}
+		// Confirm the wire value actually contains the percent-encoded form.
+		if !strings.Contains(req.URL.RawQuery, "EmailAddress=user%2Btag%40example.com") {
+			t.Errorf("expected percent-encoded EmailAddress in raw query, got: %s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -86,6 +95,25 @@ func TestListSuppressions_WithParams(t *testing.T) {
 	}
 }
 
+// TestListSuppressions_EmptyStreamID asserts that an empty streamID is rejected
+// before any HTTP request is made, preventing silent URL construction bugs.
+func TestListSuppressions_EmptyStreamID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not have been made for empty streamID")
+		return nil, nil
+	})))
+
+	_, err := api.ListSuppressions("", nil)
+	if err == nil {
+		t.Fatal("expected an error for empty streamID, got nil")
+	}
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got: %v", err)
+	}
+}
+
+// TestListSuppressions_APIError asserts that a non-2xx response returns a
+// PostmarkErr so callers can inspect the error code.
 func TestListSuppressions_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -99,6 +127,13 @@ func TestListSuppressions_APIError(t *testing.T) {
 	_, err := api.ListSuppressions("outbound", nil)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)
+	}
+	if pe.ErrorCode != pmErr.ErrorCode {
+		t.Errorf("ErrorCode = %d, want %d", pe.ErrorCode, pmErr.ErrorCode)
 	}
 }
 
@@ -153,6 +188,25 @@ func TestCreateSuppressions_Success(t *testing.T) {
 	}
 }
 
+// TestCreateSuppressions_EmptyStreamID asserts that an empty streamID is
+// rejected before any HTTP request is made.
+func TestCreateSuppressions_EmptyStreamID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not have been made for empty streamID")
+		return nil, nil
+	})))
+
+	_, err := api.CreateSuppressions("", &CreateSuppressionsReq{})
+	if err == nil {
+		t.Fatal("expected an error for empty streamID, got nil")
+	}
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got: %v", err)
+	}
+}
+
+// TestCreateSuppressions_APIError asserts that a non-2xx response returns a
+// PostmarkErr so callers can inspect the error code.
 func TestCreateSuppressions_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 400, Message: "bad request"}
 
@@ -166,6 +220,13 @@ func TestCreateSuppressions_APIError(t *testing.T) {
 	_, err := api.CreateSuppressions("outbound", &CreateSuppressionsReq{})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)
+	}
+	if pe.ErrorCode != pmErr.ErrorCode {
+		t.Errorf("ErrorCode = %d, want %d", pe.ErrorCode, pmErr.ErrorCode)
 	}
 }
 
@@ -220,6 +281,23 @@ func TestDeleteSuppressions_Success(t *testing.T) {
 	}
 }
 
+// TestDeleteSuppressions_EmptyStreamID asserts that an empty streamID is
+// rejected before any HTTP request is made.
+func TestDeleteSuppressions_EmptyStreamID(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not have been made for empty streamID")
+		return nil, nil
+	})))
+
+	_, err := api.DeleteSuppressions("", &DeleteSuppressionsReq{})
+	if err == nil {
+		t.Fatal("expected an error for empty streamID, got nil")
+	}
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got: %v", err)
+	}
+}
+
 func TestDeleteSuppressions_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -234,6 +312,8 @@ func TestDeleteSuppressions_NotFound(t *testing.T) {
 	}
 }
 
+// TestDeleteSuppressions_APIError asserts that a non-2xx response returns a
+// PostmarkErr so callers can inspect the error code.
 func TestDeleteSuppressions_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal server error"}
 
@@ -247,5 +327,12 @@ func TestDeleteSuppressions_APIError(t *testing.T) {
 	_, err := api.DeleteSuppressions("outbound", &DeleteSuppressionsReq{})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be (or wrap) PostmarkErr, got: %T %v", err, err)
+	}
+	if pe.ErrorCode != pmErr.ErrorCode {
+		t.Errorf("ErrorCode = %d, want %d", pe.ErrorCode, pmErr.ErrorCode)
 	}
 }

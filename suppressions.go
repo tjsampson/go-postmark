@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,13 +18,16 @@ type (
 		CreatedAt         time.Time `json:"CreatedAt"`
 	}
 
-	// ListSuppressionsParams holds optional query parameters for the list suppressions endpoint.
+	// ListSuppressionsParams holds optional query parameters for the list suppressions
+	// endpoint. Each field maps directly to the query parameter of the same name.
 	ListSuppressionsParams struct {
 		SuppressionReason string
 		Origin            string
-		EmailAddress      string
-		FromDate          string
-		ToDate            string
+		// EmailAddress may contain characters such as '+' that are special in URLs;
+		// they are always encoded via url.Values.Encode before being appended to the path.
+		EmailAddress string
+		FromDate     string
+		ToDate       string
 	}
 
 	// ListSuppressionsResp is the response envelope returned by the list suppressions endpoint.
@@ -41,7 +45,10 @@ type (
 		Suppressions []SuppressionEmail `json:"Suppressions"`
 	}
 
-	// SuppressionResult represents the per-email result in a create or delete suppressions response.
+	// SuppressionResult represents the per-email result in a create or delete
+	// suppressions response. A single type is used for both operations because the
+	// Postmark API returns identical fields for each; if the API diverges in the
+	// future, dedicated types can be introduced at that point.
 	SuppressionResult struct {
 		EmailAddress string `json:"EmailAddress"`
 		Status       string `json:"Status"`
@@ -64,11 +71,18 @@ type (
 	}
 )
 
+// errEmptyStreamID is returned by any suppression method that receives an
+// empty streamID, which would otherwise silently produce a malformed URL.
+var errEmptyStreamID = errors.New("postmark: streamID must not be empty")
+
 // ListSuppressions returns the suppressions dump for the given message stream.
 // An optional ListSuppressionsParams can be provided to filter results.
 // Corresponds to GET /message-streams/{streamID}/suppressions/dump.
 func (a *API) ListSuppressions(streamID string, params *ListSuppressionsParams) (*ListSuppressionsResp, error) {
-	path := fmt.Sprintf("message-streams/%s/suppressions/dump", streamID)
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+	path := fmt.Sprintf("message-streams/%s/suppressions/dump", url.PathEscape(streamID))
 	if params != nil {
 		q := url.Values{}
 		if params.SuppressionReason != "" {
@@ -111,7 +125,14 @@ func (a *API) ListSuppressions(streamID string, params *ListSuppressionsParams) 
 // for the given message stream.
 // Corresponds to POST /message-streams/{streamID}/suppressions.
 func (a *API) CreateSuppressions(streamID string, body *CreateSuppressionsReq) (*CreateSuppressionsResp, error) {
-	httpReq, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions", streamID), body)
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+	httpReq, err := a.newRequest(
+		http.MethodPost,
+		fmt.Sprintf("message-streams/%s/suppressions", url.PathEscape(streamID)),
+		body,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +152,14 @@ func (a *API) CreateSuppressions(streamID string, body *CreateSuppressionsReq) (
 // for the given message stream.
 // Corresponds to POST /message-streams/{streamID}/suppressions/delete.
 func (a *API) DeleteSuppressions(streamID string, body *DeleteSuppressionsReq) (*DeleteSuppressionsResp, error) {
-	httpReq, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions/delete", streamID), body)
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+	httpReq, err := a.newRequest(
+		http.MethodPost,
+		fmt.Sprintf("message-streams/%s/suppressions/delete", url.PathEscape(streamID)),
+		body,
+	)
 	if err != nil {
 		return nil, err
 	}
