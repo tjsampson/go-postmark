@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -22,6 +23,16 @@ func APITokenOpt(token string) Option {
 	}
 }
 
+// ServerTokenOpt returns an Option that sets the Postmark server token
+// used in the X-Postmark-Server-Token request header for email-sending
+// endpoints. If not provided, the token falls back to the
+// POSTMARK_SERVER_TOKEN environment variable.
+func ServerTokenOpt(token string) Option {
+	return func(api *API) {
+		api.serverToken = token
+	}
+}
+
 // TimeoutOpt returns an Option that overrides the default 10-second HTTP
 // request timeout. The timeout is reconciled with the underlying *http.Client
 // (if any) in New() after all options have been applied, so option order does
@@ -31,4 +42,13 @@ func TimeoutOpt(timeout time.Duration) Option {
 		api.timeout = timeout
 		api.timeoutSet = true
 	}
+}
+
+// resolveServerToken returns the effective server token: the explicitly set
+// value takes precedence, otherwise the POSTMARK_SERVER_TOKEN env var is used.
+func resolveServerToken(api *API) string {
+	if api.serverToken != "" {
+		return api.serverToken
+	}
+	return os.Getenv("POSTMARK_SERVER_TOKEN")
 }
