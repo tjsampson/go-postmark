@@ -72,6 +72,9 @@ type (
 	// open tracking. A nil pointer omits the field, deferring to the Postmark
 	// server-side default.
 	//
+	// TrackLinks valid values per the Postmark API spec: "None", "HtmlAndText",
+	// "HtmlOnly", "TextOnly". An empty string omits the field.
+	//
 	// TemplateModel is omitted from the JSON body when nil (omitempty). Callers
 	// that want to explicitly send an empty model should pass an initialised but
 	// empty map[string]interface{}{}.
@@ -180,10 +183,7 @@ func (a *API) ListTemplates(count, offset int, layoutTemplate string) (*ListTemp
 		params.Set("layoutTemplate", layoutTemplate)
 	}
 
-	// Use url.URL to build the query string so that params.Encode() never
-	// produces a trailing bare '?' (e.g. when all optional params are absent).
-	u := &url.URL{Path: "templates", RawQuery: params.Encode()}
-	req, err := a.newServerTokenRequest(http.MethodGet, u.Path+"?"+u.RawQuery, nil)
+	req, err := a.newServerTokenRequest(http.MethodGet, "templates?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
