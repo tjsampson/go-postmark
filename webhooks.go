@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,8 +23,8 @@ type (
 
 	// WebhookTriggerOpen configures the Open event trigger for a webhook.
 	WebhookTriggerOpen struct {
-		Enabled            bool `json:"Enabled"`
-		PostFirstOpenOnly  bool `json:"PostFirstOpenOnly"`
+		Enabled           bool `json:"Enabled"`
+		PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
 	}
 
 	// WebhookTriggerClick configures the Click event trigger for a webhook.
@@ -54,13 +55,16 @@ type (
 	}
 
 	// WebhookTriggers groups all the event triggers for a webhook.
+	// Pointer fields with omitempty allow partial-update semantics on PUT: only
+	// triggers explicitly provided by the caller are serialised; triggers left as
+	// nil are omitted from the JSON body and therefore left unchanged by the API.
 	WebhookTriggers struct {
-		Open               WebhookTriggerOpen               `json:"Open"`
-		Click              WebhookTriggerClick              `json:"Click"`
-		Delivery           WebhookTriggerDelivery           `json:"Delivery"`
-		Bounce             WebhookTriggerBounce             `json:"Bounce"`
-		SpamComplaint      WebhookTriggerSpamComplaint      `json:"SpamComplaint"`
-		SubscriptionChange WebhookTriggerSubscriptionChange `json:"SubscriptionChange"`
+		Open               *WebhookTriggerOpen               `json:"Open,omitempty"`
+		Click              *WebhookTriggerClick              `json:"Click,omitempty"`
+		Delivery           *WebhookTriggerDelivery           `json:"Delivery,omitempty"`
+		Bounce             *WebhookTriggerBounce             `json:"Bounce,omitempty"`
+		SpamComplaint      *WebhookTriggerSpamComplaint      `json:"SpamComplaint,omitempty"`
+		SubscriptionChange *WebhookTriggerSubscriptionChange `json:"SubscriptionChange,omitempty"`
 	}
 
 	// WebhookReq is the request body for creating or updating a webhook.
@@ -90,6 +94,8 @@ type (
 
 // newServerRequest builds an *http.Request for the given HTTP method and API
 // path, using the X-Postmark-Server-Token header required by the Webhooks API.
+// It replaces the X-Postmark-Account-Token header set by newRequest with the
+// server-scoped token stored in a.serverToken.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
@@ -97,7 +103,7 @@ func (a *API) newServerRequest(method, path string, body interface{}) (*http.Req
 	}
 	// Webhooks API requires the server token, not the account token.
 	req.Header.Del("X-Postmark-Account-Token")
-	req.Header.Set("X-Postmark-Server-Token", a.token)
+	req.Header.Set("X-Postmark-Server-Token", a.serverToken)
 	return req, nil
 }
 
@@ -149,7 +155,11 @@ func (a *API) GetWebhook(id int) (*WebhookResp, error) {
 
 // CreateWebhook creates a new webhook with the settings in webhookReq.
 // It returns the full WebhookResp on success.
+// webhookReq must not be nil; if it is, an error is returned immediately.
 func (a *API) CreateWebhook(webhookReq *WebhookReq) (*WebhookResp, error) {
+	if webhookReq == nil {
+		return nil, errors.New("webhookReq must not be nil")
+	}
 	req, err := a.newServerRequest(http.MethodPost, "webhooks", webhookReq)
 	if err != nil {
 		return nil, err
@@ -168,7 +178,11 @@ func (a *API) CreateWebhook(webhookReq *WebhookReq) (*WebhookResp, error) {
 
 // UpdateWebhook applies the changes in webhookReq to the webhook identified by
 // id and returns the updated WebhookResp.
+// webhookReq must not be nil; if it is, an error is returned immediately.
 func (a *API) UpdateWebhook(id int, webhookReq *WebhookReq) (*WebhookResp, error) {
+	if webhookReq == nil {
+		return nil, errors.New("webhookReq must not be nil")
+	}
 	req, err := a.newServerRequest(http.MethodPut, fmt.Sprintf("webhooks/%d", id), webhookReq)
 	if err != nil {
 		return nil, err

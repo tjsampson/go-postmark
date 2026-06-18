@@ -23,11 +23,12 @@ type (
 	// API is the main client for the Postmark API.
 	// Create one with New() and supply functional options to configure it.
 	API struct {
-		client     Doer
-		timeout    time.Duration
-		baseHost   string
-		token      string
-		timeoutSet bool // true when TimeoutOpt was explicitly supplied
+		client      Doer
+		timeout     time.Duration
+		baseHost    string
+		token       string
+		serverToken string
+		timeoutSet  bool // true when TimeoutOpt was explicitly supplied
 	}
 
 	// Req holds the URI and optional JSON body string for an outgoing request.

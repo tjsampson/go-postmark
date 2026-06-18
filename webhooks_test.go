@@ -18,7 +18,7 @@ func TestListWebhooks_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -26,8 +26,8 @@ func TestListWebhooks_Success(t *testing.T) {
 			if !strings.HasSuffix(req.URL.Path, "/webhooks") {
 				t.Errorf("unexpected path: %s", req.URL.Path)
 			}
-			if req.Header.Get("X-Postmark-Server-Token") == "" {
-				t.Error("expected X-Postmark-Server-Token header to be set")
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 			}
 			if req.Header.Get("X-Postmark-Account-Token") != "" {
 				t.Error("X-Postmark-Account-Token header must not be set for webhooks")
@@ -59,7 +59,7 @@ func TestListWebhooks_MessageStreamQueryParam(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if !strings.Contains(req.URL.RawQuery, "MessageStream=outbound") {
 				t.Errorf("expected MessageStream query param, query=%s", req.URL.RawQuery)
@@ -87,15 +87,21 @@ func TestListWebhooks_NoStream(t *testing.T) {
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.URL.RawQuery != "" {
-			t.Errorf("expected empty query string when messageStream is empty, got %q", req.URL.RawQuery)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if req.URL.RawQuery != "" {
+				t.Errorf("expected empty query string when messageStream is empty, got %q", req.URL.RawQuery)
+			}
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, want),
+			}, nil
+		})),
+	)
 
 	got, err := api.ListWebhooks("")
 	if err != nil {
@@ -109,12 +115,15 @@ func TestListWebhooks_NoStream(t *testing.T) {
 func TestListWebhooks_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
 
 	_, err := api.ListWebhooks("outbound")
 	if err == nil {
@@ -137,17 +146,17 @@ func TestGetWebhook_Success(t *testing.T) {
 			{Name: "X-Custom", Value: "value"},
 		},
 		Triggers: WebhookTriggers{
-			Open:               WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
-			Click:              WebhookTriggerClick{Enabled: true},
-			Delivery:           WebhookTriggerDelivery{Enabled: true},
-			Bounce:             WebhookTriggerBounce{Enabled: true, IncludeContent: false},
-			SpamComplaint:      WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
-			SubscriptionChange: WebhookTriggerSubscriptionChange{Enabled: true},
+			Open:               &WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
+			Click:              &WebhookTriggerClick{Enabled: true},
+			Delivery:           &WebhookTriggerDelivery{Enabled: true},
+			Bounce:             &WebhookTriggerBounce{Enabled: true, IncludeContent: false},
+			SpamComplaint:      &WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
+			SubscriptionChange: &WebhookTriggerSubscriptionChange{Enabled: true},
 		},
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -155,8 +164,8 @@ func TestGetWebhook_Success(t *testing.T) {
 			if !strings.HasSuffix(req.URL.Path, "/webhooks/42") {
 				t.Errorf("unexpected path: %s", req.URL.Path)
 			}
-			if req.Header.Get("X-Postmark-Server-Token") == "" {
-				t.Error("expected X-Postmark-Server-Token header to be set")
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -181,18 +190,21 @@ func TestGetWebhook_Success(t *testing.T) {
 	if len(got.Headers) != 1 || got.Headers[0].Name != "X-Custom" {
 		t.Errorf("unexpected Headers: %+v", got.Headers)
 	}
-	if !got.Triggers.Open.Enabled {
+	if got.Triggers.Open == nil || !got.Triggers.Open.Enabled {
 		t.Error("expected Open trigger to be enabled")
 	}
 }
 
 func TestGetWebhook_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.GetWebhook(9999)
 	if err == nil {
@@ -211,12 +223,12 @@ func TestCreateWebhook_Success(t *testing.T) {
 		Url:           "https://example.com/new-hook",
 		MessageStream: "outbound",
 		Triggers: WebhookTriggers{
-			Delivery: WebhookTriggerDelivery{Enabled: true},
+			Delivery: &WebhookTriggerDelivery{Enabled: true},
 		},
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -224,8 +236,8 @@ func TestCreateWebhook_Success(t *testing.T) {
 			if !strings.HasSuffix(req.URL.Path, "/webhooks") {
 				t.Errorf("unexpected path: %s", req.URL.Path)
 			}
-			if req.Header.Get("X-Postmark-Server-Token") == "" {
-				t.Error("expected X-Postmark-Server-Token header to be set")
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 			}
 			if req.Header.Get("Content-Type") != "application/json" {
 				t.Errorf("expected Content-Type application/json, got %s", req.Header.Get("Content-Type"))
@@ -241,7 +253,7 @@ func TestCreateWebhook_Success(t *testing.T) {
 		Url:           "https://example.com/new-hook",
 		MessageStream: "outbound",
 		Triggers: WebhookTriggers{
-			Delivery: WebhookTriggerDelivery{Enabled: true},
+			Delivery: &WebhookTriggerDelivery{Enabled: true},
 		},
 	})
 	if err != nil {
@@ -253,8 +265,23 @@ func TestCreateWebhook_Success(t *testing.T) {
 	if got.Url != want.Url {
 		t.Errorf("Url = %q, want %q", got.Url, want.Url)
 	}
-	if !got.Triggers.Delivery.Enabled {
+	if got.Triggers.Delivery == nil || !got.Triggers.Delivery.Enabled {
 		t.Error("expected Delivery trigger to be enabled")
+	}
+}
+
+func TestCreateWebhook_NilReq(t *testing.T) {
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client must not be called when webhookReq is nil")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.CreateWebhook(nil)
+	if err == nil {
+		t.Fatal("expected an error when webhookReq is nil, got nil")
 	}
 }
 
@@ -271,12 +298,15 @@ func TestCreateWebhook_WithAuthAndHeaders(t *testing.T) {
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, want),
+			}, nil
+		})),
+	)
 
 	got, err := api.CreateWebhook(&WebhookReq{
 		Url: "https://example.com/secure-hook",
@@ -305,12 +335,15 @@ func TestCreateWebhook_WithAuthAndHeaders(t *testing.T) {
 func TestCreateWebhook_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 300, Message: "invalid webhook URL"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusUnprocessableEntity,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusUnprocessableEntity,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
 
 	_, err := api.CreateWebhook(&WebhookReq{Url: "not-a-url"})
 	if err == nil {
@@ -325,13 +358,13 @@ func TestUpdateWebhook_Success(t *testing.T) {
 		ID:  42,
 		Url: "https://example.com/updated-hook",
 		Triggers: WebhookTriggers{
-			Open:  WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: false},
-			Click: WebhookTriggerClick{Enabled: true},
+			Open:  &WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: false},
+			Click: &WebhookTriggerClick{Enabled: true},
 		},
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPut {
 				t.Errorf("expected PUT, got %s", req.Method)
@@ -339,8 +372,8 @@ func TestUpdateWebhook_Success(t *testing.T) {
 			if !strings.HasSuffix(req.URL.Path, "/webhooks/42") {
 				t.Errorf("unexpected path: %s", req.URL.Path)
 			}
-			if req.Header.Get("X-Postmark-Server-Token") == "" {
-				t.Error("expected X-Postmark-Server-Token header to be set")
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -352,8 +385,8 @@ func TestUpdateWebhook_Success(t *testing.T) {
 	got, err := api.UpdateWebhook(42, &WebhookReq{
 		Url: "https://example.com/updated-hook",
 		Triggers: WebhookTriggers{
-			Open:  WebhookTriggerOpen{Enabled: true},
-			Click: WebhookTriggerClick{Enabled: true},
+			Open:  &WebhookTriggerOpen{Enabled: true},
+			Click: &WebhookTriggerClick{Enabled: true},
 		},
 	})
 	if err != nil {
@@ -365,21 +398,39 @@ func TestUpdateWebhook_Success(t *testing.T) {
 	if got.Url != want.Url {
 		t.Errorf("Url = %q, want %q", got.Url, want.Url)
 	}
-	if !got.Triggers.Open.Enabled {
+	if got.Triggers.Open == nil || !got.Triggers.Open.Enabled {
 		t.Error("expected Open trigger to be enabled")
 	}
-	if !got.Triggers.Click.Enabled {
+	if got.Triggers.Click == nil || !got.Triggers.Click.Enabled {
 		t.Error("expected Click trigger to be enabled")
 	}
 }
 
+func TestUpdateWebhook_NilReq(t *testing.T) {
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client must not be called when webhookReq is nil")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.UpdateWebhook(42, nil)
+	if err == nil {
+		t.Fatal("expected an error when webhookReq is nil, got nil")
+	}
+}
+
 func TestUpdateWebhook_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.UpdateWebhook(9999, &WebhookReq{Url: "https://example.com/hook"})
 	if err == nil {
@@ -396,7 +447,7 @@ func TestDeleteWebhook_Success(t *testing.T) {
 	want := DeleteResp{Message: "Webhook deleted."}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodDelete {
 				t.Errorf("expected DELETE, got %s", req.Method)
@@ -404,8 +455,8 @@ func TestDeleteWebhook_Success(t *testing.T) {
 			if !strings.HasSuffix(req.URL.Path, "/webhooks/77") {
 				t.Errorf("unexpected path: %s", req.URL.Path)
 			}
-			if req.Header.Get("X-Postmark-Server-Token") == "" {
-				t.Error("expected X-Postmark-Server-Token header to be set")
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -424,12 +475,15 @@ func TestDeleteWebhook_Success(t *testing.T) {
 }
 
 func TestDeleteWebhook_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "webhook not found"}),
+			}, nil
+		})),
+	)
 
 	_, err := api.DeleteWebhook(9999)
 	if err == nil {
@@ -443,12 +497,15 @@ func TestDeleteWebhook_NotFound(t *testing.T) {
 func TestDeleteWebhook_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal server error"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
 
 	_, err := api.DeleteWebhook(1)
 	if err == nil {
@@ -463,31 +520,34 @@ func TestWebhookTriggers_AllFields(t *testing.T) {
 		ID:  300,
 		Url: "https://example.com/full-trigger-hook",
 		Triggers: WebhookTriggers{
-			Open:               WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
-			Click:              WebhookTriggerClick{Enabled: true},
-			Delivery:           WebhookTriggerDelivery{Enabled: true},
-			Bounce:             WebhookTriggerBounce{Enabled: true, IncludeContent: true},
-			SpamComplaint:      WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
-			SubscriptionChange: WebhookTriggerSubscriptionChange{Enabled: true},
+			Open:               &WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
+			Click:              &WebhookTriggerClick{Enabled: true},
+			Delivery:           &WebhookTriggerDelivery{Enabled: true},
+			Bounce:             &WebhookTriggerBounce{Enabled: true, IncludeContent: true},
+			SpamComplaint:      &WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
+			SubscriptionChange: &WebhookTriggerSubscriptionChange{Enabled: true},
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, want),
+			}, nil
+		})),
+	)
 
 	got, err := api.CreateWebhook(&WebhookReq{
 		Url: "https://example.com/full-trigger-hook",
 		Triggers: WebhookTriggers{
-			Open:               WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
-			Click:              WebhookTriggerClick{Enabled: true},
-			Delivery:           WebhookTriggerDelivery{Enabled: true},
-			Bounce:             WebhookTriggerBounce{Enabled: true, IncludeContent: true},
-			SpamComplaint:      WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
-			SubscriptionChange: WebhookTriggerSubscriptionChange{Enabled: true},
+			Open:               &WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
+			Click:              &WebhookTriggerClick{Enabled: true},
+			Delivery:           &WebhookTriggerDelivery{Enabled: true},
+			Bounce:             &WebhookTriggerBounce{Enabled: true, IncludeContent: true},
+			SpamComplaint:      &WebhookTriggerSpamComplaint{Enabled: true, IncludeContent: true},
+			SubscriptionChange: &WebhookTriggerSubscriptionChange{Enabled: true},
 		},
 	})
 	if err != nil {
@@ -496,16 +556,16 @@ func TestWebhookTriggers_AllFields(t *testing.T) {
 	if got.ID != 300 {
 		t.Errorf("expected ID 300, got %d", got.ID)
 	}
-	if !got.Triggers.Open.PostFirstOpenOnly {
+	if got.Triggers.Open == nil || !got.Triggers.Open.PostFirstOpenOnly {
 		t.Error("expected Open.PostFirstOpenOnly to be true")
 	}
-	if !got.Triggers.Bounce.IncludeContent {
+	if got.Triggers.Bounce == nil || !got.Triggers.Bounce.IncludeContent {
 		t.Error("expected Bounce.IncludeContent to be true")
 	}
-	if !got.Triggers.SpamComplaint.IncludeContent {
+	if got.Triggers.SpamComplaint == nil || !got.Triggers.SpamComplaint.IncludeContent {
 		t.Error("expected SpamComplaint.IncludeContent to be true")
 	}
-	if !got.Triggers.SubscriptionChange.Enabled {
+	if got.Triggers.SubscriptionChange == nil || !got.Triggers.SubscriptionChange.Enabled {
 		t.Error("expected SubscriptionChange.Enabled to be true")
 	}
 }
