@@ -1,10 +1,17 @@
 package postmark
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+// boolPtr is a helper that returns a pointer to a bool literal.
+func boolPtr(b bool) *bool { return &b }
+
+// intPtr is a helper that returns a pointer to an int literal.
+func intPtr(i int) *int { return &i }
 
 // ---- ListBounces ---------------------------------------------------------------
 
@@ -36,7 +43,7 @@ func TestListBounces_Success(t *testing.T) {
 		}, nil
 	})))
 
-	got, err := api.ListBounces(ListBouncesParams{Count: 10})
+	got, err := api.ListBounces(ListBouncesParams{Count: intPtr(10)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,11 +81,76 @@ func TestListBounces_WithParams(t *testing.T) {
 
 	_, err := api.ListBounces(ListBouncesParams{
 		Type:        "HardBounce",
-		Inactive:    true,
+		Inactive:    boolPtr(true),
 		EmailFilter: "test@example.com",
-		Count:       25,
-		Offset:      5,
+		Count:       intPtr(25),
+		Offset:      intPtr(5),
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestListBounces_ZeroOffset verifies that an explicit Offset of 0 is sent in
+// the query string. This distinguished the "first page" intent from "not set".
+func TestListBounces_ZeroOffset(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.RawQuery
+		if !strings.Contains(q, "offset=0") {
+			t.Errorf("expected offset=0 in query, got: %s", q)
+		}
+		if !strings.Contains(q, "count=10") {
+			t.Errorf("expected count=10 in query, got: %s", q)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListBouncesResp{}),
+		}, nil
+	})))
+
+	_, err := api.ListBounces(ListBouncesParams{
+		Count:  intPtr(10),
+		Offset: intPtr(0),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestListBounces_InactiveFalse verifies that Inactive: &false sends inactive=false.
+func TestListBounces_InactiveFalse(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.RawQuery
+		if !strings.Contains(q, "inactive=false") {
+			t.Errorf("expected inactive=false in query, got: %s", q)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListBouncesResp{}),
+		}, nil
+	})))
+
+	_, err := api.ListBounces(ListBouncesParams{Inactive: boolPtr(false)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestListBounces_NilInactive verifies that a nil Inactive pointer omits the
+// inactive parameter entirely (no inactive=false noise for the common case).
+func TestListBounces_NilInactive(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.RawQuery
+		if strings.Contains(q, "inactive") {
+			t.Errorf("inactive should be absent when Inactive is nil, got query: %s", q)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, ListBouncesResp{}),
+		}, nil
+	})))
+
+	_, err := api.ListBounces(ListBouncesParams{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,6 +206,12 @@ func TestListBounces_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	} else if pe.ErrorCode != 500 {
+		t.Errorf("PostmarkErr.ErrorCode = %d, want 500", pe.ErrorCode)
+	}
 }
 
 // ---- GetBounce -----------------------------------------------------------------
@@ -167,6 +245,9 @@ func TestGetBounce_Success(t *testing.T) {
 		}
 		if req.Header.Get("X-Postmark-Server-Token") == "" {
 			t.Error("expected X-Postmark-Server-Token header to be set")
+		}
+		if req.Header.Get("X-Postmark-Account-Token") != "" {
+			t.Error("X-Postmark-Account-Token header must not be set on bounce requests")
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -210,6 +291,9 @@ func TestGetBounce_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
 }
 
 func TestGetBounce_APIError(t *testing.T) {
@@ -225,6 +309,10 @@ func TestGetBounce_APIError(t *testing.T) {
 	_, err := api.GetBounce(1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -242,6 +330,9 @@ func TestGetBounceDump_Success(t *testing.T) {
 		}
 		if req.Header.Get("X-Postmark-Server-Token") == "" {
 			t.Error("expected X-Postmark-Server-Token header to be set")
+		}
+		if req.Header.Get("X-Postmark-Account-Token") != "" {
+			t.Error("X-Postmark-Account-Token header must not be set on dump requests")
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -270,6 +361,9 @@ func TestGetBounceDump_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
 }
 
 func TestGetBounceDump_EmptyBody(t *testing.T) {
@@ -291,6 +385,26 @@ func TestGetBounceDump_EmptyBody(t *testing.T) {
 	}
 }
 
+func TestGetBounceDump_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, pmErr),
+		}, nil
+	})))
+
+	_, err := api.GetBounceDump(1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+}
+
 // ---- ActivateBounce ------------------------------------------------------------
 
 func TestActivateBounce_Success(t *testing.T) {
@@ -309,6 +423,9 @@ func TestActivateBounce_Success(t *testing.T) {
 		}
 		if req.Header.Get("X-Postmark-Server-Token") == "" {
 			t.Error("expected X-Postmark-Server-Token header to be set")
+		}
+		if req.Header.Get("X-Postmark-Account-Token") != "" {
+			t.Error("X-Postmark-Account-Token header must not be set on activate requests")
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -343,6 +460,9 @@ func TestActivateBounce_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
 }
 
 func TestActivateBounce_APIError(t *testing.T) {
@@ -358,6 +478,10 @@ func TestActivateBounce_APIError(t *testing.T) {
 	_, err := api.ActivateBounce(1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -446,12 +570,17 @@ func TestGetDeliveryStats_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
 }
 
 // ---- ServerToken header sanity -------------------------------------------------
 
-// TestServerTokenHeader verifies that all bounce/delivery-stats endpoints
-// use X-Postmark-Server-Token and do not leak X-Postmark-Account-Token.
+// TestServerTokenHeader_AllEndpoints verifies that all bounce/delivery-stats
+// endpoints use X-Postmark-Server-Token with the correct value and do not leak
+// X-Postmark-Account-Token.
 func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	const token = "server-tok-xyz"
 
@@ -504,4 +633,27 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 		})))
 		api.GetDeliveryStats() //nolint:errcheck
 	})
+}
+
+// TestServerTokenOpt verifies that ServerTokenOpt sets a distinct server token
+// that is used for bounce/delivery-stats endpoints while the account token is
+// kept separate.
+func TestServerTokenOpt(t *testing.T) {
+	const accountToken = "acct-token"
+	const serverToken = "srv-token"
+
+	api := New(
+		APITokenOpt(accountToken),
+		ServerTokenOpt(serverToken),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != serverToken {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, serverToken)
+			}
+			if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
+				t.Errorf("X-Postmark-Account-Token must be absent on server-token requests, got %q", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, ListBouncesResp{})}, nil
+		})),
+	)
+	api.ListBounces(ListBouncesParams{}) //nolint:errcheck
 }
