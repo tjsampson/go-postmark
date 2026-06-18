@@ -47,8 +47,10 @@ type (
 		ReplyTo string `json:"ReplyTo,omitempty"`
 		// Headers are custom email headers to include.
 		Headers []EmailHeader `json:"Headers,omitempty"`
-		// TrackOpens enables open tracking for this email.
-		TrackOpens bool `json:"TrackOpens,omitempty"`
+		// TrackOpens enables or disables open tracking for this email.
+		// Use a pointer so that an explicit false can be sent to override an
+		// account-level default; a nil value omits the field entirely.
+		TrackOpens *bool `json:"TrackOpens,omitempty"`
 		// TrackLinks controls click tracking. Valid values: "None", "HtmlAndText",
 		// "HtmlOnly", "TextOnly".
 		TrackLinks string `json:"TrackLinks,omitempty"`
@@ -90,8 +92,12 @@ type (
 		ReplyTo string `json:"ReplyTo,omitempty"`
 		// Tag is used to categorise outbound email.
 		Tag string `json:"Tag,omitempty"`
-		// TrackOpens enables open tracking for this email.
-		TrackOpens bool `json:"TrackOpens,omitempty"`
+		// Subject overrides the template's subject line for this send.
+		Subject string `json:"Subject,omitempty"`
+		// TrackOpens enables or disables open tracking for this email.
+		// Use a pointer so that an explicit false can be sent to override an
+		// account-level default; a nil value omits the field entirely.
+		TrackOpens *bool `json:"TrackOpens,omitempty"`
 		// TrackLinks controls click tracking. Valid values: "None", "HtmlAndText",
 		// "HtmlOnly", "TextOnly".
 		TrackLinks string `json:"TrackLinks,omitempty"`
@@ -112,7 +118,15 @@ type (
 		// MessageStream is the message stream to use. Defaults to "outbound".
 		MessageStream string `json:"MessageStream,omitempty"`
 		// InlineCss controls whether CSS in the <head> is inlined into HTML.
-		InlineCss bool `json:"InlineCss,omitempty"`
+		// Use a pointer so that an explicit false can be sent to override an
+		// account-level default; a nil value omits the field entirely.
+		InlineCss *bool `json:"InlineCss,omitempty"`
+	}
+
+	// batchEmailReqWrapper is the envelope Postmark expects for
+	// POST /email/batch.
+	batchEmailReqWrapper struct {
+		Messages []SendEmailReq `json:"Messages"`
 	}
 
 	// bulkEmailReqWrapper is the envelope Postmark expects for POST /email/bulk.
@@ -126,6 +140,20 @@ type (
 		Messages []SendTemplateReq `json:"Messages"`
 	}
 
+	// BulkJobBatch holds per-batch outcome information within a bulk job response.
+	BulkJobBatch struct {
+		// StartedAt is the UTC timestamp when this batch started processing.
+		StartedAt string `json:"StartedAt"`
+		// CompletedAt is the UTC timestamp when this batch finished processing.
+		CompletedAt string `json:"CompletedAt"`
+		// TotalCount is the total number of messages in this batch.
+		TotalCount int `json:"TotalCount"`
+		// SuccessCount is the number of messages sent successfully in this batch.
+		SuccessCount int `json:"SuccessCount"`
+		// ErrorCount is the number of messages that failed in this batch.
+		ErrorCount int `json:"ErrorCount"`
+	}
+
 	// BulkJobResp is the response returned by the POST /email/bulk and
 	// GET /email/bulk/{bulk-request-id} endpoints.
 	BulkJobResp struct {
@@ -133,6 +161,10 @@ type (
 		ID string `json:"ID"`
 		// CreatedAt is the UTC timestamp when the bulk job was created.
 		CreatedAt string `json:"CreatedAt"`
+		// StartedProcessingAt is the UTC timestamp when the job began processing.
+		StartedProcessingAt string `json:"StartedProcessingAt,omitempty"`
+		// CompletedProcessingAt is the UTC timestamp when the job finished processing.
+		CompletedProcessingAt string `json:"CompletedProcessingAt,omitempty"`
 		// Status is the current status of the job (e.g. "Queued", "Processing",
 		// "Completed").
 		Status string `json:"Status"`
@@ -142,6 +174,9 @@ type (
 		SuccessCount int `json:"SuccessCount"`
 		// ErrorCount is the number of messages that failed.
 		ErrorCount int `json:"ErrorCount"`
+		// Batches contains per-batch outcome details. Present once the job has
+		// started processing.
+		Batches []BulkJobBatch `json:"Batches,omitempty"`
 	}
 )
 
@@ -166,7 +201,8 @@ func (a *API) SendEmail(emailReq *SendEmailReq) (*SendEmailResp, error) {
 // SendBatch sends a batch of email messages via POST /email/batch.
 // Authentication uses the X-Postmark-Server-Token header.
 func (a *API) SendBatch(reqs []SendEmailReq) ([]SendEmailResp, error) {
-	req, err := a.newServerRequest(http.MethodPost, "email/batch", reqs)
+	payload := batchEmailReqWrapper{Messages: reqs}
+	req, err := a.newServerRequest(http.MethodPost, "email/batch", payload)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +279,10 @@ func (a *API) CreateBulkJob(reqs []SendEmailReq) (*BulkJobResp, error) {
 // GET /email/bulk/{bulk-request-id}.
 // Authentication uses the X-Postmark-Server-Token header.
 func (a *API) GetBulkJob(id string) (*BulkJobResp, error) {
-	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("email/bulk/%s", id), nil)
+	if id == "" {
+		return nil, fmt.Errorf("postmark: GetBulkJob: id must not be empty")
+	}
+	req, err := a.newServerRequest(http.MethodGet, "email/bulk/"+id, nil)
 	if err != nil {
 		return nil, err
 	}

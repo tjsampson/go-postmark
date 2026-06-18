@@ -97,7 +97,12 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 
 // newServerRequest builds an *http.Request authenticated with the
 // X-Postmark-Server-Token header, as required by email-sending endpoints.
+// It returns an error immediately if no server token has been configured,
+// surfacing the misconfiguration before any network call is made.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	if a.serverToken == "" {
+		return nil, fmt.Errorf("postmark: server token is not configured; use ServerTokenOpt to set it")
+	}
 	req, err := a.buildRequest(method, path, body)
 	if err != nil {
 		return nil, err
