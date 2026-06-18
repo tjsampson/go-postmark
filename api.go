@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 type (
@@ -152,7 +150,7 @@ func readResponse(resp *http.Response) (*Resp, error) {
 	var pmError PostmarkErr
 	err = json.Unmarshal(respBody, &pmError)
 	if err != nil {
-		return newResponse(respBody, resp), errors.Wrap(err, "failed to unmarshal postmark err")
+		return newResponse(respBody, resp), fmt.Errorf("failed to unmarshal postmark err: %w", err)
 	}
 
 	return newResponse(respBody, resp), pmError
