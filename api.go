@@ -85,6 +85,9 @@ func New(options ...Option) *API {
 // If body is non-nil it is JSON-encoded as the request body and Content-Type
 // is set to application/json. If body is nil, http.NoBody is used and no
 // Content-Type header is set.
+// The request is authenticated with the headerAccountToken header. Server-scoped
+// endpoints should use newServerRequest instead, which swaps this header for
+// headerServerToken.
 func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
 	var reqBody io.Reader = http.NoBody
 	hasBody := body != nil
@@ -108,7 +111,7 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Postmark-Account-Token", a.token)
+	req.Header.Set(headerAccountToken, a.token)
 
 	return req, nil
 }

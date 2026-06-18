@@ -90,6 +90,9 @@ func TestListWebhooks_NoStream(t *testing.T) {
 	api := New(
 		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// When messageStream is empty, url.Values.Encode() returns "" so
+			// len(params) == 0 and no "?" suffix is appended to the path.
+			// We verify that the query string is therefore absent on the wire.
 			if req.URL.RawQuery != "" {
 				t.Errorf("expected empty query string when messageStream is empty, got %q", req.URL.RawQuery)
 			}
@@ -131,6 +134,27 @@ func TestListWebhooks_APIError(t *testing.T) {
 	}
 }
 
+// TestListWebhooks_NoServerToken verifies that newServerRequest fails fast with
+// an error when no server token has been configured, so the request is never
+// sent rather than going out with an empty authentication header.
+func TestListWebhooks_NoServerToken(t *testing.T) {
+	api := New(
+		// Intentionally omit ServerTokenOpt — serverToken remains "".
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client must not be called when serverToken is empty")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.ListWebhooks("")
+	if err == nil {
+		t.Fatal("expected an error when serverToken is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "serverToken") {
+		t.Errorf("expected error to mention serverToken, got: %v", err)
+	}
+}
+
 // ---- GetWebhook ----------------------------------------------------------------
 
 func TestGetWebhook_Success(t *testing.T) {
@@ -138,7 +162,7 @@ func TestGetWebhook_Success(t *testing.T) {
 		ID:            42,
 		Url:           "https://example.com/hook",
 		MessageStream: "outbound",
-		HttpAuth: &WebhookHttpAuth{
+		HTTPAuth: &WebhookHTTPAuth{
 			Username: "user",
 			Password: "pass",
 		},
@@ -184,8 +208,8 @@ func TestGetWebhook_Success(t *testing.T) {
 	if got.Url != want.Url {
 		t.Errorf("Url = %q, want %q", got.Url, want.Url)
 	}
-	if got.HttpAuth == nil || got.HttpAuth.Username != "user" {
-		t.Errorf("unexpected HttpAuth: %+v", got.HttpAuth)
+	if got.HTTPAuth == nil || got.HTTPAuth.Username != "user" {
+		t.Errorf("unexpected HTTPAuth: %+v", got.HTTPAuth)
 	}
 	if len(got.Headers) != 1 || got.Headers[0].Name != "X-Custom" {
 		t.Errorf("unexpected Headers: %+v", got.Headers)
@@ -252,7 +276,7 @@ func TestCreateWebhook_Success(t *testing.T) {
 	got, err := api.CreateWebhook(&WebhookReq{
 		Url:           "https://example.com/new-hook",
 		MessageStream: "outbound",
-		Triggers: WebhookTriggers{
+		Triggers: &WebhookTriggers{
 			Delivery: &WebhookTriggerDelivery{Enabled: true},
 		},
 	})
@@ -274,14 +298,14 @@ func TestCreateWebhook_NilReq(t *testing.T) {
 	api := New(
 		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-			t.Error("HTTP client must not be called when webhookReq is nil")
+			t.Error("HTTP client must not be called when req is nil")
 			return nil, nil
 		})),
 	)
 
 	_, err := api.CreateWebhook(nil)
 	if err == nil {
-		t.Fatal("expected an error when webhookReq is nil, got nil")
+		t.Fatal("expected an error when req is nil, got nil")
 	}
 }
 
@@ -289,7 +313,7 @@ func TestCreateWebhook_WithAuthAndHeaders(t *testing.T) {
 	want := WebhookResp{
 		ID:  200,
 		Url: "https://example.com/secure-hook",
-		HttpAuth: &WebhookHttpAuth{
+		HTTPAuth: &WebhookHTTPAuth{
 			Username: "admin",
 			Password: "secret",
 		},
@@ -310,7 +334,7 @@ func TestCreateWebhook_WithAuthAndHeaders(t *testing.T) {
 
 	got, err := api.CreateWebhook(&WebhookReq{
 		Url: "https://example.com/secure-hook",
-		HttpAuth: &WebhookHttpAuth{
+		HTTPAuth: &WebhookHTTPAuth{
 			Username: "admin",
 			Password: "secret",
 		},
@@ -324,8 +348,8 @@ func TestCreateWebhook_WithAuthAndHeaders(t *testing.T) {
 	if got.ID != 200 {
 		t.Errorf("expected ID 200, got %d", got.ID)
 	}
-	if got.HttpAuth == nil || got.HttpAuth.Username != "admin" {
-		t.Errorf("unexpected HttpAuth: %+v", got.HttpAuth)
+	if got.HTTPAuth == nil || got.HTTPAuth.Username != "admin" {
+		t.Errorf("unexpected HTTPAuth: %+v", got.HTTPAuth)
 	}
 	if len(got.Headers) != 1 || got.Headers[0].Name != "Authorization" {
 		t.Errorf("unexpected Headers: %+v", got.Headers)
@@ -384,7 +408,7 @@ func TestUpdateWebhook_Success(t *testing.T) {
 
 	got, err := api.UpdateWebhook(42, &WebhookReq{
 		Url: "https://example.com/updated-hook",
-		Triggers: WebhookTriggers{
+		Triggers: &WebhookTriggers{
 			Open:  &WebhookTriggerOpen{Enabled: true},
 			Click: &WebhookTriggerClick{Enabled: true},
 		},
@@ -410,14 +434,14 @@ func TestUpdateWebhook_NilReq(t *testing.T) {
 	api := New(
 		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-			t.Error("HTTP client must not be called when webhookReq is nil")
+			t.Error("HTTP client must not be called when req is nil")
 			return nil, nil
 		})),
 	)
 
 	_, err := api.UpdateWebhook(42, nil)
 	if err == nil {
-		t.Fatal("expected an error when webhookReq is nil, got nil")
+		t.Fatal("expected an error when req is nil, got nil")
 	}
 }
 
@@ -541,7 +565,7 @@ func TestWebhookTriggers_AllFields(t *testing.T) {
 
 	got, err := api.CreateWebhook(&WebhookReq{
 		Url: "https://example.com/full-trigger-hook",
-		Triggers: WebhookTriggers{
+		Triggers: &WebhookTriggers{
 			Open:               &WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: true},
 			Click:              &WebhookTriggerClick{Enabled: true},
 			Delivery:           &WebhookTriggerDelivery{Enabled: true},

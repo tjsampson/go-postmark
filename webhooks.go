@@ -8,9 +8,17 @@ import (
 	"net/url"
 )
 
+// Header key constants shared between newRequest and newServerRequest so that
+// the deletion in newServerRequest is robust against typos and never silently
+// becomes a no-op if the key name changes in one place.
+const (
+	headerAccountToken = "X-Postmark-Account-Token"
+	headerServerToken  = "X-Postmark-Server-Token"
+)
+
 type (
-	// WebhookHttpAuth holds the HTTP Basic Authentication credentials for a webhook.
-	WebhookHttpAuth struct {
+	// WebhookHTTPAuth holds the HTTP Basic Authentication credentials for a webhook.
+	WebhookHTTPAuth struct {
 		Username string `json:"Username"`
 		Password string `json:"Password"`
 	}
@@ -68,12 +76,14 @@ type (
 	}
 
 	// WebhookReq is the request body for creating or updating a webhook.
+	// Triggers is a pointer so that a caller creating a bare URL-only webhook can
+	// omit the Triggers object entirely (nil pointer + omitempty → not serialised).
 	WebhookReq struct {
 		Url           string           `json:"Url"`
 		MessageStream string           `json:"MessageStream"`
-		HttpAuth      *WebhookHttpAuth `json:"HttpAuth,omitempty"`
+		HTTPAuth      *WebhookHTTPAuth `json:"HttpAuth,omitempty"`
 		Headers       []WebhookHeader  `json:"Headers,omitempty"`
-		Triggers      WebhookTriggers  `json:"Triggers"`
+		Triggers      *WebhookTriggers `json:"Triggers,omitempty"`
 	}
 
 	// WebhookResp represents a Postmark webhook as returned by the API.
@@ -81,7 +91,7 @@ type (
 		ID            int              `json:"ID"`
 		Url           string           `json:"Url"`
 		MessageStream string           `json:"MessageStream"`
-		HttpAuth      *WebhookHttpAuth `json:"HttpAuth,omitempty"`
+		HTTPAuth      *WebhookHTTPAuth `json:"HttpAuth,omitempty"`
 		Headers       []WebhookHeader  `json:"Headers,omitempty"`
 		Triggers      WebhookTriggers  `json:"Triggers"`
 	}
@@ -93,17 +103,22 @@ type (
 )
 
 // newServerRequest builds an *http.Request for the given HTTP method and API
-// path, using the X-Postmark-Server-Token header required by the Webhooks API.
-// It replaces the X-Postmark-Account-Token header set by newRequest with the
-// server-scoped token stored in a.serverToken.
+// path, authenticated with the X-Postmark-Server-Token header required by the
+// Webhooks API. It removes the X-Postmark-Account-Token header (keyed by the
+// headerAccountToken constant) that newRequest always sets, and replaces it
+// with X-Postmark-Server-Token. Returns an error immediately if serverToken is
+// empty to prevent sending unauthenticated requests.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	if a.serverToken == "" {
+		return nil, errors.New("serverToken is required; use ServerTokenOpt to configure it")
+	}
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
 		return nil, err
 	}
 	// Webhooks API requires the server token, not the account token.
-	req.Header.Del("X-Postmark-Account-Token")
-	req.Header.Set("X-Postmark-Server-Token", a.serverToken)
+	req.Header.Del(headerAccountToken)
+	req.Header.Set(headerServerToken, a.serverToken)
 	return req, nil
 }
 
@@ -153,18 +168,18 @@ func (a *API) GetWebhook(id int) (*WebhookResp, error) {
 	return &data, nil
 }
 
-// CreateWebhook creates a new webhook with the settings in webhookReq.
+// CreateWebhook creates a new webhook with the settings in req.
 // It returns the full WebhookResp on success.
-// webhookReq must not be nil; if it is, an error is returned immediately.
-func (a *API) CreateWebhook(webhookReq *WebhookReq) (*WebhookResp, error) {
-	if webhookReq == nil {
-		return nil, errors.New("webhookReq must not be nil")
+// req must not be nil; if it is, an error is returned immediately.
+func (a *API) CreateWebhook(req *WebhookReq) (*WebhookResp, error) {
+	if req == nil {
+		return nil, errors.New("req must not be nil")
 	}
-	req, err := a.newServerRequest(http.MethodPost, "webhooks", webhookReq)
+	httpReq, err := a.newServerRequest(http.MethodPost, "webhooks", req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.Do(req)
+	resp, err := a.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -176,18 +191,18 @@ func (a *API) CreateWebhook(webhookReq *WebhookReq) (*WebhookResp, error) {
 	return &data, nil
 }
 
-// UpdateWebhook applies the changes in webhookReq to the webhook identified by
-// id and returns the updated WebhookResp.
-// webhookReq must not be nil; if it is, an error is returned immediately.
-func (a *API) UpdateWebhook(id int, webhookReq *WebhookReq) (*WebhookResp, error) {
-	if webhookReq == nil {
-		return nil, errors.New("webhookReq must not be nil")
+// UpdateWebhook applies the changes in req to the webhook identified by id
+// and returns the updated WebhookResp.
+// req must not be nil; if it is, an error is returned immediately.
+func (a *API) UpdateWebhook(id int, req *WebhookReq) (*WebhookResp, error) {
+	if req == nil {
+		return nil, errors.New("req must not be nil")
 	}
-	req, err := a.newServerRequest(http.MethodPut, fmt.Sprintf("webhooks/%d", id), webhookReq)
+	httpReq, err := a.newServerRequest(http.MethodPut, fmt.Sprintf("webhooks/%d", id), req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.Do(req)
+	resp, err := a.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
