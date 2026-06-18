@@ -1,6 +1,7 @@
 package postmark
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -50,6 +51,9 @@ func TestListMessageStreams_Success(t *testing.T) {
 	}
 	if len(got.MessageStreams) != 2 {
 		t.Errorf("len(MessageStreams) = %d, want 2", len(got.MessageStreams))
+	}
+	if got.MessageStreams[0].ID != "outbound" {
+		t.Errorf("MessageStreams[0].ID = %q, want outbound", got.MessageStreams[0].ID)
 	}
 }
 
@@ -111,6 +115,13 @@ func TestListMessageStreams_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be PostmarkErr, got %T: %v", err, err)
+	}
+	if pe.ErrorCode != 500 {
+		t.Errorf("ErrorCode = %d, want 500", pe.ErrorCode)
+	}
 }
 
 // ---- GetMessageStream ----------------------------------------------------------
@@ -148,6 +159,20 @@ func TestGetMessageStream_Success(t *testing.T) {
 	if got.ServerID != 42 {
 		t.Errorf("ServerID = %d, want 42", got.ServerID)
 	}
+	if got.Name != "Outbound" {
+		t.Errorf("Name = %q, want Outbound", got.Name)
+	}
+	if got.MessageStreamType != "Transactional" {
+		t.Errorf("MessageStreamType = %q, want Transactional", got.MessageStreamType)
+	}
+}
+
+func TestGetMessageStream_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.GetMessageStream("")
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
+	}
 }
 
 func TestGetMessageStream_NotFound(t *testing.T) {
@@ -161,6 +186,9 @@ func TestGetMessageStream_NotFound(t *testing.T) {
 	_, err := api.GetMessageStream("nonexistent")
 	if err == nil {
 		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 
@@ -210,6 +238,46 @@ func TestCreateMessageStream_Success(t *testing.T) {
 	}
 }
 
+// TestCreateMessageStream_WithSubscriptionConfig verifies that a non-nil
+// SubscriptionManagementConfiguration pointer is serialised and the response
+// is decoded correctly.
+func TestCreateMessageStream_WithSubscriptionConfig(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := &SubscriptionManagementConfiguration{UnsubscribeHandlingType: "Custom"}
+	want := MessageStreamResp{
+		ID:                                  "broadcasts",
+		ServerID:                            1,
+		Name:                                "Broadcasts",
+		MessageStreamType:                   "Broadcasts",
+		CreatedAt:                           now,
+		SubscriptionManagementConfiguration: cfg,
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, want),
+		}, nil
+	})))
+
+	got, err := api.CreateMessageStream(&CreateMessageStreamReq{
+		ID:                                  "broadcasts",
+		Name:                                "Broadcasts",
+		MessageStreamType:                   "Broadcasts",
+		SubscriptionManagementConfiguration: cfg,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SubscriptionManagementConfiguration == nil {
+		t.Fatal("expected non-nil SubscriptionManagementConfiguration")
+	}
+	if got.SubscriptionManagementConfiguration.UnsubscribeHandlingType != "Custom" {
+		t.Errorf("UnsubscribeHandlingType = %q, want Custom",
+			got.SubscriptionManagementConfiguration.UnsubscribeHandlingType)
+	}
+}
+
 func TestCreateMessageStream_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -227,6 +295,10 @@ func TestCreateMessageStream_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -265,6 +337,14 @@ func TestUpdateMessageStream_Success(t *testing.T) {
 	}
 }
 
+func TestUpdateMessageStream_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.UpdateMessageStream("", &UpdateMessageStreamReq{Name: "X"})
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
+	}
+}
+
 func TestUpdateMessageStream_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -276,6 +356,9 @@ func TestUpdateMessageStream_NotFound(t *testing.T) {
 	_, err := api.UpdateMessageStream("ghost", &UpdateMessageStreamReq{Name: "Ghost"})
 	if err == nil {
 		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 
@@ -314,6 +397,14 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 	}
 }
 
+func TestArchiveMessageStream_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.ArchiveMessageStream("")
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
+	}
+}
+
 func TestArchiveMessageStream_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -325,6 +416,9 @@ func TestArchiveMessageStream_NotFound(t *testing.T) {
 	_, err := api.ArchiveMessageStream("nonexistent")
 	if err == nil {
 		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 
@@ -361,6 +455,14 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	}
 }
 
+func TestUnarchiveMessageStream_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.UnarchiveMessageStream("")
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
+	}
+}
+
 func TestUnarchiveMessageStream_NotFound(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -372,6 +474,9 @@ func TestUnarchiveMessageStream_NotFound(t *testing.T) {
 	_, err := api.UnarchiveMessageStream("nonexistent")
 	if err == nil {
 		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 
@@ -416,7 +521,21 @@ func TestListSuppressions_Success(t *testing.T) {
 		t.Errorf("expected 1 suppression, got %d", len(got.Suppressions))
 	}
 	if got.Suppressions[0].EmailAddress != "suppressed@example.com" {
-		t.Errorf("EmailAddress = %q", got.Suppressions[0].EmailAddress)
+		t.Errorf("EmailAddress = %q, want suppressed@example.com", got.Suppressions[0].EmailAddress)
+	}
+	if got.Suppressions[0].SuppressionReason != "HardBounce" {
+		t.Errorf("SuppressionReason = %q, want HardBounce", got.Suppressions[0].SuppressionReason)
+	}
+	if got.Suppressions[0].Origin != "Recipient" {
+		t.Errorf("Origin = %q, want Recipient", got.Suppressions[0].Origin)
+	}
+}
+
+func TestListSuppressions_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.ListSuppressions("", SuppressionsParams{})
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
 	}
 }
 
@@ -472,6 +591,13 @@ func TestListSuppressions_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pe.ErrorCode != 500 {
+		t.Errorf("ErrorCode = %d, want 500", pe.ErrorCode)
+	}
 }
 
 // ---- CreateSuppression ---------------------------------------------------------
@@ -512,6 +638,19 @@ func TestCreateSuppression_Success(t *testing.T) {
 	}
 	if got.Suppressions[0].Status != "Suppressed" {
 		t.Errorf("Status = %q, want Suppressed", got.Suppressions[0].Status)
+	}
+	if got.Suppressions[0].EmailAddress != "new@example.com" {
+		t.Errorf("EmailAddress = %q, want new@example.com", got.Suppressions[0].EmailAddress)
+	}
+}
+
+func TestCreateSuppression_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.CreateSuppression("", &CreateSuppressionReq{
+		Suppressions: []SuppressionAddress{{EmailAddress: "x@example.com"}},
+	})
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
 	}
 }
 
@@ -583,6 +722,19 @@ func TestDeleteSuppression_Success(t *testing.T) {
 	if got.Suppressions[0].Status != "Deleted" {
 		t.Errorf("Status = %q, want Deleted", got.Suppressions[0].Status)
 	}
+	if got.Suppressions[0].EmailAddress != "old@example.com" {
+		t.Errorf("EmailAddress = %q, want old@example.com", got.Suppressions[0].EmailAddress)
+	}
+}
+
+func TestDeleteSuppression_EmptyID(t *testing.T) {
+	api := New()
+	_, err := api.DeleteSuppression("", &DeleteSuppressionReq{
+		Suppressions: []SuppressionAddress{{EmailAddress: "x@example.com"}},
+	})
+	if !errors.Is(err, errEmptyStreamID) {
+		t.Errorf("expected errEmptyStreamID, got %v", err)
+	}
 }
 
 func TestDeleteSuppression_NotFound(t *testing.T) {
@@ -598,6 +750,9 @@ func TestDeleteSuppression_NotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 
@@ -616,5 +771,12 @@ func TestDeleteSuppression_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pe.ErrorCode != 500 {
+		t.Errorf("ErrorCode = %d, want 500", pe.ErrorCode)
 	}
 }

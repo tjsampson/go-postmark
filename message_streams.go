@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,15 +18,15 @@ type (
 
 	// MessageStreamResp represents a Postmark Message Stream as returned by the API.
 	MessageStreamResp struct {
-		ID                                   string                               `json:"ID"`
-		ServerID                             int                                  `json:"ServerID"`
-		Name                                 string                               `json:"Name"`
-		Description                          string                               `json:"Description"`
-		MessageStreamType                    string                               `json:"MessageStreamType"`
-		CreatedAt                            time.Time                            `json:"CreatedAt"`
-		ArchivedAt                           *time.Time                           `json:"ArchivedAt"`
-		ExpungeAt                            *time.Time                           `json:"ExpungeAt"`
-		SubscriptionManagementConfiguration  SubscriptionManagementConfiguration  `json:"SubscriptionManagementConfiguration"`
+		ID                                  string                               `json:"ID"`
+		ServerID                            int                                  `json:"ServerID"`
+		Name                                string                               `json:"Name"`
+		Description                         string                               `json:"Description"`
+		MessageStreamType                   string                               `json:"MessageStreamType"`
+		CreatedAt                           time.Time                            `json:"CreatedAt"`
+		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
+		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
+		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
 	}
 
 	// ListMessageStreamsResp is the response envelope returned by the
@@ -37,33 +38,37 @@ type (
 
 	// CreateMessageStreamReq is the request body for creating a new message stream.
 	CreateMessageStreamReq struct {
-		ID                                  string                              `json:"ID"`
-		Name                                string                              `json:"Name"`
-		Description                         string                              `json:"Description,omitempty"`
-		MessageStreamType                   string                              `json:"MessageStreamType"`
-		SubscriptionManagementConfiguration SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
+		ID                                  string                               `json:"ID"`
+		Name                                string                               `json:"Name"`
+		Description                         string                               `json:"Description,omitempty"`
+		MessageStreamType                   string                               `json:"MessageStreamType"`
+		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
 	}
 
 	// UpdateMessageStreamReq is the request body for updating an existing message stream.
 	// Only the fields provided will be changed.
 	UpdateMessageStreamReq struct {
-		Name                                string                              `json:"Name,omitempty"`
-		Description                         string                              `json:"Description,omitempty"`
-		SubscriptionManagementConfiguration SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
+		Name                                string                               `json:"Name,omitempty"`
+		Description                         string                               `json:"Description,omitempty"`
+		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
 	}
 
 	// MessageStreamArchiveResp is the response returned when a message stream
 	// is archived.
 	MessageStreamArchiveResp struct {
-		ID         string     `json:"ID"`
-		ServerID   int        `json:"ServerID"`
-		ExpungeAt  *time.Time `json:"ExpungeAt"`
+		ID        string     `json:"ID"`
+		ServerID  int        `json:"ServerID"`
+		ExpungeAt *time.Time `json:"ExpungeAt"`
 	}
 )
 
-// newServerRequest is like newRequest but uses the X-Postmark-Server-Token
-// header instead of X-Postmark-Account-Token, as required by the Message
-// Streams and Suppressions endpoints.
+// errEmptyStreamID is returned by any method that requires a non-empty stream ID.
+var errEmptyStreamID = errors.New("streamID must not be empty")
+
+// newServerRequest is like newRequest but replaces the X-Postmark-Account-Token
+// header with X-Postmark-Server-Token, as required by the Message Streams and
+// Suppressions endpoints. a.token is expected to hold the server-level API token
+// (set via APITokenOpt or the POSTMARK_API_TOKEN environment variable).
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
@@ -97,9 +102,9 @@ func (a *API) ListMessageStreams(streamType string, includeArchived bool) (*List
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListMessageStreamsResp
@@ -111,14 +116,18 @@ func (a *API) ListMessageStreams(streamType string, includeArchived bool) (*List
 
 // GetMessageStream fetches the message stream identified by streamID.
 func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	req, err := a.newServerRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -136,9 +145,9 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -151,14 +160,18 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 // UpdateMessageStream applies the changes in req to the message stream
 // identified by streamID and returns the updated MessageStreamResp.
 func (a *API) UpdateMessageStream(streamID string, req *UpdateMessageStreamReq) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	httpReq, err := a.newServerRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", streamID), req)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp
@@ -171,14 +184,18 @@ func (a *API) UpdateMessageStream(streamID string, req *UpdateMessageStreamReq) 
 // ArchiveMessageStream archives the message stream identified by streamID.
 // It returns a MessageStreamArchiveResp containing the expunge timestamp.
 func (a *API) ArchiveMessageStream(streamID string) (*MessageStreamArchiveResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamArchiveResp
@@ -191,14 +208,18 @@ func (a *API) ArchiveMessageStream(streamID string) (*MessageStreamArchiveResp, 
 // UnarchiveMessageStream unarchives the message stream identified by streamID
 // and returns the restored MessageStreamResp.
 func (a *API) UnarchiveMessageStream(streamID string) (*MessageStreamResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	httpReq, err := a.newServerRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", streamID), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data MessageStreamResp

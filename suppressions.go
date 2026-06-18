@@ -11,10 +11,10 @@ import (
 type (
 	// SuppressionEntry represents a single suppressed email address.
 	SuppressionEntry struct {
-		EmailAddress      string     `json:"EmailAddress"`
-		SuppressionReason string     `json:"SuppressionReason"`
-		Origin            string     `json:"Origin"`
-		CreatedAt         time.Time  `json:"CreatedAt"`
+		EmailAddress      string    `json:"EmailAddress"`
+		SuppressionReason string    `json:"SuppressionReason"`
+		Origin            string    `json:"Origin"`
+		CreatedAt         time.Time `json:"CreatedAt"`
 	}
 
 	// SuppressionsParams holds optional query parameters for listing suppressions.
@@ -71,6 +71,10 @@ type (
 // ListSuppressions returns the suppression dump for the message stream
 // identified by streamID. Use params to narrow results.
 func (a *API) ListSuppressions(streamID string, params SuppressionsParams) (*SuppressionsResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	qp := url.Values{}
 	if params.SuppressionReason != "" {
 		qp.Set("SuppressionReason", params.SuppressionReason)
@@ -98,9 +102,9 @@ func (a *API) ListSuppressions(streamID string, params SuppressionsParams) (*Sup
 		return nil, err
 	}
 
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var data SuppressionsResp
@@ -113,6 +117,10 @@ func (a *API) ListSuppressions(streamID string, params SuppressionsParams) (*Sup
 // CreateSuppression adds one or more suppressions to the message stream
 // identified by streamID.
 func (a *API) CreateSuppression(streamID string, req *CreateSuppressionReq) (*SuppressionResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,
 		fmt.Sprintf("message-streams/%s/suppressions", streamID),
@@ -122,9 +130,9 @@ func (a *API) CreateSuppression(streamID string, req *CreateSuppressionReq) (*Su
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data SuppressionResp
@@ -137,6 +145,10 @@ func (a *API) CreateSuppression(streamID string, req *CreateSuppressionReq) (*Su
 // DeleteSuppression removes one or more suppressions from the message stream
 // identified by streamID.
 func (a *API) DeleteSuppression(streamID string, req *DeleteSuppressionReq) (*SuppressionResp, error) {
+	if streamID == "" {
+		return nil, errEmptyStreamID
+	}
+
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,
 		fmt.Sprintf("message-streams/%s/suppressions/delete", streamID),
@@ -146,9 +158,9 @@ func (a *API) DeleteSuppression(streamID string, req *DeleteSuppressionReq) (*Su
 		return nil, err
 	}
 
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data SuppressionResp
