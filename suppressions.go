@@ -1,0 +1,153 @@
+package postmark
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+type (
+	// SuppressionResp represents a single suppression entry returned by the API.
+	SuppressionResp struct {
+		EmailAddress      string    `json:"EmailAddress"`
+		SuppressionReason string    `json:"SuppressionReason"`
+		Origin            string    `json:"Origin"`
+		CreatedAt         time.Time `json:"CreatedAt"`
+	}
+
+	// ListSuppressionsParams holds optional query parameters for the list suppressions endpoint.
+	ListSuppressionsParams struct {
+		SuppressionReason string
+		Origin            string
+		EmailAddress      string
+		FromDate          string
+		ToDate            string
+	}
+
+	// ListSuppressionsResp is the response envelope returned by the list suppressions endpoint.
+	ListSuppressionsResp struct {
+		Suppressions []SuppressionResp `json:"Suppressions"`
+	}
+
+	// SuppressionEmail holds a single email address for create/delete suppression requests.
+	SuppressionEmail struct {
+		EmailAddress string `json:"EmailAddress"`
+	}
+
+	// CreateSuppressionsReq is the request body for creating suppressions.
+	CreateSuppressionsReq struct {
+		Suppressions []SuppressionEmail `json:"Suppressions"`
+	}
+
+	// SuppressionCreateResult represents the per-email result in a create suppressions response.
+	SuppressionCreateResult struct {
+		EmailAddress string `json:"EmailAddress"`
+		Status       string `json:"Status"`
+		Message      string `json:"Message,omitempty"`
+	}
+
+	// CreateSuppressionsResp is the response envelope for the create suppressions endpoint.
+	CreateSuppressionsResp struct {
+		Suppressions []SuppressionCreateResult `json:"Suppressions"`
+	}
+
+	// DeleteSuppressionsReq is the request body for deleting suppressions.
+	DeleteSuppressionsReq struct {
+		Suppressions []SuppressionEmail `json:"Suppressions"`
+	}
+
+	// SuppressionDeleteResult represents the per-email result in a delete suppressions response.
+	SuppressionDeleteResult struct {
+		EmailAddress string `json:"EmailAddress"`
+		Status       string `json:"Status"`
+		Message      string `json:"Message,omitempty"`
+	}
+
+	// DeleteSuppressionsResp is the response envelope for the delete suppressions endpoint.
+	DeleteSuppressionsResp struct {
+		Suppressions []SuppressionDeleteResult `json:"Suppressions"`
+	}
+)
+
+// ListSuppressions returns the suppressions dump for the given message stream.
+// An optional ListSuppressionsParams can be provided to filter results.
+// Corresponds to GET /message-streams/{streamID}/suppressions/dump.
+func (a *API) ListSuppressions(streamID string, params *ListSuppressionsParams) (*ListSuppressionsResp, error) {
+	path := fmt.Sprintf("message-streams/%s/suppressions/dump", streamID)
+	if params != nil {
+		first := true
+		add := func(key, val string) {
+			if val == "" {
+				return
+			}
+			if first {
+				path += "?"
+				first = false
+			} else {
+				path += "&"
+			}
+			path += key + "=" + val
+		}
+		add("SuppressionReason", params.SuppressionReason)
+		add("Origin", params.Origin)
+		add("EmailAddress", params.EmailAddress)
+		add("FromDate", params.FromDate)
+		add("ToDate", params.ToDate)
+	}
+
+	req, err := a.newRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, e := a.Do(req)
+	if e != nil {
+		return nil, e
+	}
+
+	var data ListSuppressionsResp
+	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+// CreateSuppressions adds one or more email addresses to the suppression list
+// for the given message stream.
+// Corresponds to POST /message-streams/{streamID}/suppressions.
+func (a *API) CreateSuppressions(streamID string, body *CreateSuppressionsReq) (*CreateSuppressionsResp, error) {
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions", streamID), body)
+	if err != nil {
+		return nil, err
+	}
+	resp, e := a.Do(req)
+	if e != nil {
+		return nil, e
+	}
+
+	var data CreateSuppressionsResp
+	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+// DeleteSuppressions removes one or more email addresses from the suppression list
+// for the given message stream.
+// Corresponds to POST /message-streams/{streamID}/suppressions/delete.
+func (a *API) DeleteSuppressions(streamID string, body *DeleteSuppressionsReq) (*DeleteSuppressionsResp, error) {
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions/delete", streamID), body)
+	if err != nil {
+		return nil, err
+	}
+	resp, e := a.Do(req)
+	if e != nil {
+		return nil, e
+	}
+
+	var data DeleteSuppressionsResp
+	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
