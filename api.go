@@ -133,15 +133,14 @@ func readResponse(resp *http.Response) (*Resp, error) {
 	if resp.StatusCode == http.StatusNotFound {
 		return newResponse(respBody, resp), ErrNotFound
 	}
+	if resp.StatusCode == http.StatusConflict {
+		return newResponse(respBody, resp), ErrExists
+	}
 
 	var pmError PostmarkErr
 	err = json.Unmarshal(respBody, &pmError)
 	if err != nil {
 		return newResponse(respBody, resp), errors.Wrap(err, "failed to unmarshal postmark err")
-	}
-
-	if pmError.ErrorCode == ErrExists.ErrorCode {
-		return newResponse(respBody, resp), ErrExists
 	}
 
 	return newResponse(respBody, resp), pmError
