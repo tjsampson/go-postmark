@@ -11,24 +11,24 @@ import (
 type (
 	// DomainResp represents a Postmark Domain as returned by the API.
 	DomainResp struct {
-		ID                       int    `json:"ID"`
-		Name                     string `json:"Name"`
-		SPFVerified              bool   `json:"SPFVerified"`
-		SPFHost                  string `json:"SPFHost"`
-		SPFTextValue             string `json:"SPFTextValue"`
-		DKIMVerified             bool   `json:"DKIMVerified"`
-		WeakDKIM                 bool   `json:"WeakDKIM"`
-		DKIMHost                 string `json:"DKIMHost"`
-		DKIMTextValue            string `json:"DKIMTextValue"`
-		DKIMPendingHost          string `json:"DKIMPendingHost"`
-		DKIMPendingTextValue     string `json:"DKIMPendingTextValue"`
-		DKIMRevokedHost          string `json:"DKIMRevokedHost"`
-		DKIMRevokedTextValue     string `json:"DKIMRevokedTextValue"`
-		SafeToRemoveRevokedKeyFromDNS bool `json:"SafeToRemoveRevokedKeyFromDNS"`
-		DKIMUpdateStatus         string `json:"DKIMUpdateStatus"`
-		ReturnPathDomain         string `json:"ReturnPathDomain"`
-		ReturnPathDomainVerified bool   `json:"ReturnPathDomainVerified"`
-		ReturnPathDomainCNAMEValue string `json:"ReturnPathDomainCNAMEValue"`
+		ID                            int    `json:"ID"`
+		Name                          string `json:"Name"`
+		SPFVerified                   bool   `json:"SPFVerified"`
+		SPFHost                       string `json:"SPFHost"`
+		SPFTextValue                  string `json:"SPFTextValue"`
+		DKIMVerified                  bool   `json:"DKIMVerified"`
+		WeakDKIM                      bool   `json:"WeakDKIM"`
+		DKIMHost                      string `json:"DKIMHost"`
+		DKIMTextValue                 string `json:"DKIMTextValue"`
+		DKIMPendingHost               string `json:"DKIMPendingHost"`
+		DKIMPendingTextValue          string `json:"DKIMPendingTextValue"`
+		DKIMRevokedHost               string `json:"DKIMRevokedHost"`
+		DKIMRevokedTextValue          string `json:"DKIMRevokedTextValue"`
+		SafeToRemoveRevokedKeyFromDNS bool   `json:"SafeToRemoveRevokedKeyFromDNS"`
+		DKIMUpdateStatus              string `json:"DKIMUpdateStatus"`
+		ReturnPathDomain              string `json:"ReturnPathDomain"`
+		ReturnPathDomainVerified      bool   `json:"ReturnPathDomainVerified"`
+		ReturnPathDomainCNAMEValue    string `json:"ReturnPathDomainCNAMEValue"`
 	}
 
 	// ListDomainsResp is the response envelope returned by the list-domains endpoint.
@@ -59,9 +59,9 @@ func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ListDomainsResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -77,9 +77,9 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -94,9 +94,9 @@ func (a *API) GetDomain(domainID int64) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -112,9 +112,9 @@ func (a *API) UpdateDomain(domainID int64, req *UpdateDomainReq) (*DomainResp, e
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -130,9 +130,9 @@ func (a *API) DeleteDomain(domainID int64) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -147,9 +147,9 @@ func (a *API) VerifyDomainDKIM(domainID int64) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -164,9 +164,9 @@ func (a *API) VerifyDomainReturnPath(domainID int64) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -181,9 +181,9 @@ func (a *API) VerifyDomainSPF(domainID int64) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -198,9 +198,9 @@ func (a *API) RotateDomainDKIM(domainID int64) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

@@ -11,35 +11,35 @@ import (
 type (
 	// SenderSignatureResp represents a Postmark Sender Signature as returned by the API.
 	SenderSignatureResp struct {
-		ID                       int    `json:"ID"`
-		Domain                   string `json:"Domain"`
-		EmailAddress             string `json:"EmailAddress"`
-		ReplyToEmailAddress      string `json:"ReplyToEmailAddress"`
-		Name                     string `json:"Name"`
-		Confirmed                bool   `json:"Confirmed"`
-		SPFVerified              bool   `json:"SPFVerified"`
-		SPFHost                  string `json:"SPFHost"`
-		SPFTextValue             string `json:"SPFTextValue"`
-		DKIMVerified             bool   `json:"DKIMVerified"`
-		WeakDKIM                 bool   `json:"WeakDKIM"`
-		DKIMHost                 string `json:"DKIMHost"`
-		DKIMTextValue            string `json:"DKIMTextValue"`
-		DKIMPendingHost          string `json:"DKIMPendingHost"`
-		DKIMPendingTextValue     string `json:"DKIMPendingTextValue"`
-		DKIMRevokedHost          string `json:"DKIMRevokedHost"`
-		DKIMRevokedTextValue     string `json:"DKIMRevokedTextValue"`
-		SafeToRemoveRevokedKeyFromDNS bool `json:"SafeToRemoveRevokedKeyFromDNS"`
-		DKIMUpdateStatus         string `json:"DKIMUpdateStatus"`
-		ReturnPathDomain         string `json:"ReturnPathDomain"`
-		ReturnPathDomainVerified bool   `json:"ReturnPathDomainVerified"`
-		ReturnPathDomainCNAMEValue string `json:"ReturnPathDomainCNAMEValue"`
+		ID                            int    `json:"ID"`
+		Domain                        string `json:"Domain"`
+		EmailAddress                  string `json:"EmailAddress"`
+		ReplyToEmailAddress           string `json:"ReplyToEmailAddress"`
+		Name                          string `json:"Name"`
+		Confirmed                     bool   `json:"Confirmed"`
+		SPFVerified                   bool   `json:"SPFVerified"`
+		SPFHost                       string `json:"SPFHost"`
+		SPFTextValue                  string `json:"SPFTextValue"`
+		DKIMVerified                  bool   `json:"DKIMVerified"`
+		WeakDKIM                      bool   `json:"WeakDKIM"`
+		DKIMHost                      string `json:"DKIMHost"`
+		DKIMTextValue                 string `json:"DKIMTextValue"`
+		DKIMPendingHost               string `json:"DKIMPendingHost"`
+		DKIMPendingTextValue          string `json:"DKIMPendingTextValue"`
+		DKIMRevokedHost               string `json:"DKIMRevokedHost"`
+		DKIMRevokedTextValue          string `json:"DKIMRevokedTextValue"`
+		SafeToRemoveRevokedKeyFromDNS bool   `json:"SafeToRemoveRevokedKeyFromDNS"`
+		DKIMUpdateStatus              string `json:"DKIMUpdateStatus"`
+		ReturnPathDomain              string `json:"ReturnPathDomain"`
+		ReturnPathDomainVerified      bool   `json:"ReturnPathDomainVerified"`
+		ReturnPathDomainCNAMEValue    string `json:"ReturnPathDomainCNAMEValue"`
 	}
 
 	// ListSenderSignaturesResp is the response envelope returned by the
 	// list sender signatures endpoint.
 	ListSenderSignaturesResp struct {
-		TotalCount       int                   `json:"TotalCount"`
-		SenderSignatures []SenderSignatureResp  `json:"SenderSignatures"`
+		TotalCount       int                  `json:"TotalCount"`
+		SenderSignatures []SenderSignatureResp `json:"SenderSignatures"`
 	}
 
 	// CreateSenderSignatureReq is the request body for creating a new Sender Signature.
@@ -68,9 +68,9 @@ func (a *API) ListSenderSignatures(count, offset int) (*ListSenderSignaturesResp
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ListSenderSignaturesResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -86,9 +86,9 @@ func (a *API) CreateSenderSignature(req *CreateSenderSignatureReq) (*SenderSigna
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data SenderSignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -103,9 +103,9 @@ func (a *API) GetSenderSignature(signatureID int64) (*SenderSignatureResp, error
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data SenderSignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -121,9 +121,9 @@ func (a *API) UpdateSenderSignature(signatureID int64, req *UpdateSenderSignatur
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data SenderSignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -139,9 +139,9 @@ func (a *API) DeleteSenderSignature(signatureID int64) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -157,9 +157,9 @@ func (a *API) ResendSenderSignatureConfirmation(signatureID int64) (*DeleteResp,
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -175,9 +175,9 @@ func (a *API) VerifySenderSignatureSPF(signatureID int64) (*SenderSignatureResp,
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data SenderSignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -193,9 +193,9 @@ func (a *API) RequestNewDKIMForSenderSignature(signatureID int64) (*SenderSignat
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data SenderSignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

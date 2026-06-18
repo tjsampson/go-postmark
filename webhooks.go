@@ -22,13 +22,8 @@ type (
 
 	// WebhookTriggerOpen holds the configuration for open event triggers.
 	WebhookTriggerOpen struct {
-		Enabled     bool `json:"Enabled"`
+		Enabled           bool `json:"Enabled"`
 		PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
-	}
-
-	// WebhookTriggerEnabled holds a simple enabled flag for a trigger type.
-	WebhookTriggerEnabled struct {
-		Enabled bool `json:"Enabled"`
 	}
 
 	// WebhookTriggerClick holds the configuration for click event triggers.
@@ -43,7 +38,7 @@ type (
 
 	// WebhookTriggerBounce holds the configuration for bounce event triggers.
 	WebhookTriggerBounce struct {
-		Enabled     bool `json:"Enabled"`
+		Enabled        bool `json:"Enabled"`
 		IncludeContent bool `json:"IncludeContent"`
 	}
 
@@ -83,13 +78,23 @@ type (
 		Webhooks []WebhookResp `json:"Webhooks"`
 	}
 
-	// CreateWebhookReq is the request body for creating or updating a webhook.
+	// CreateWebhookReq is the request body for creating a new webhook.
 	CreateWebhookReq struct {
-		Url           string          `json:"Url"`
-		MessageStream string          `json:"MessageStream,omitempty"`
+		Url           string           `json:"Url"`
+		MessageStream string           `json:"MessageStream,omitempty"`
 		HttpAuth      *WebhookHttpAuth `json:"HttpAuth,omitempty"`
-		Headers       []NameValue     `json:"Headers,omitempty"`
+		Headers       []NameValue      `json:"Headers,omitempty"`
 		Triggers      *WebhookTriggers `json:"Triggers,omitempty"`
+	}
+
+	// UpdateWebhookReq is the request body for updating an existing webhook.
+	// It mirrors CreateWebhookReq but is a distinct type so the two can evolve
+	// independently if the create and update APIs ever diverge.
+	UpdateWebhookReq struct {
+		Url      string           `json:"Url,omitempty"`
+		HttpAuth *WebhookHttpAuth `json:"HttpAuth,omitempty"`
+		Headers  []NameValue      `json:"Headers,omitempty"`
+		Triggers *WebhookTriggers `json:"Triggers,omitempty"`
 	}
 )
 
@@ -108,9 +113,9 @@ func (a *API) ListWebhooks(messageStream string) (*ListWebhooksResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ListWebhooksResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -126,9 +131,9 @@ func (a *API) CreateWebhook(req *CreateWebhookReq) (*WebhookResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data WebhookResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -143,9 +148,9 @@ func (a *API) GetWebhook(webhookID int64) (*WebhookResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data WebhookResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -156,14 +161,14 @@ func (a *API) GetWebhook(webhookID int64) (*WebhookResp, error) {
 
 // UpdateWebhook applies the changes in req to the webhook identified by
 // webhookID and returns the updated WebhookResp.
-func (a *API) UpdateWebhook(webhookID int64, req *CreateWebhookReq) (*WebhookResp, error) {
+func (a *API) UpdateWebhook(webhookID int64, req *UpdateWebhookReq) (*WebhookResp, error) {
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("webhooks/%d", webhookID), req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data WebhookResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -179,9 +184,9 @@ func (a *API) DeleteWebhook(webhookID int64) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

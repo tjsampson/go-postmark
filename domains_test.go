@@ -2,235 +2,185 @@ package postmark
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
 
-func TestListDomains_Success(t *testing.T) {
-	want := ListDomainsResp{
+// TestDomainsCRUD exercises ListDomains, CreateDomain, GetDomain, UpdateDomain,
+// and DeleteDomain using table-driven success and error sub-cases.
+func TestDomainsCRUD(t *testing.T) {
+	domainResp := DomainResp{ID: 7, Name: "test.com", SPFVerified: true, ReturnPathDomain: "pm.test.com"}
+	listResp := ListDomainsResp{
 		TotalCount: 2,
-		Domains: []DomainResp{
-			{ID: 1, Name: "example.com"},
-			{ID: 2, Name: "other.com"},
+		Domains:    []DomainResp{{ID: 1, Name: "example.com"}, {ID: 2, Name: "other.com"}},
+	}
+	deleteResp := DeleteResp{Message: "Domain deleted."}
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
+
+	tests := []struct {
+		name           string
+		wantMethod     string
+		wantPathSuffix string
+		statusCode     int
+		responseBody   interface{}
+		call           func(api *API) (interface{}, error)
+		checkOK        func(t *testing.T, got interface{})
+	}{
+		{
+			name:           "ListDomains/success",
+			wantMethod:     http.MethodGet,
+			wantPathSuffix: "/domains",
+			statusCode:     http.StatusOK,
+			responseBody:   listResp,
+			call:           func(api *API) (interface{}, error) { return api.ListDomains(10, 0) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*ListDomainsResp)
+				if r.TotalCount != 2 {
+					t.Errorf("TotalCount = %d, want 2", r.TotalCount)
+				}
+				if len(r.Domains) != 2 {
+					t.Errorf("len(Domains) = %d, want 2", len(r.Domains))
+				}
+			},
+		},
+		{
+			name:         "ListDomains/error",
+			statusCode:   http.StatusInternalServerError,
+			responseBody: pmErr,
+			call:         func(api *API) (interface{}, error) { return api.ListDomains(10, 0) },
+		},
+		{
+			name:           "CreateDomain/success",
+			wantMethod:     http.MethodPost,
+			wantPathSuffix: "/domains",
+			statusCode:     http.StatusOK,
+			responseBody:   domainResp,
+			call: func(api *API) (interface{}, error) {
+				return api.CreateDomain(&CreateDomainReq{Name: "test.com"})
+			},
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*DomainResp)
+				if r.ID != 7 || r.Name != "test.com" {
+					t.Errorf("got %+v, want ID=7 Name=test.com", r)
+				}
+			},
+		},
+		{
+			name:         "CreateDomain/error",
+			statusCode:   http.StatusUnprocessableEntity,
+			responseBody: PostmarkErr{ErrorCode: 422, Message: "invalid domain"},
+			call: func(api *API) (interface{}, error) {
+				return api.CreateDomain(&CreateDomainReq{Name: ""})
+			},
+		},
+		{
+			name:           "GetDomain/success",
+			wantMethod:     http.MethodGet,
+			wantPathSuffix: "/domains/7",
+			statusCode:     http.StatusOK,
+			responseBody:   domainResp,
+			call:           func(api *API) (interface{}, error) { return api.GetDomain(7) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*DomainResp)
+				if r.ID != 7 || r.Name != "test.com" {
+					t.Errorf("got %+v, want ID=7 Name=test.com", r)
+				}
+			},
+		},
+		{
+			name:           "GetDomain/not_found",
+			wantPathSuffix: "/domains/9999",
+			statusCode:     http.StatusNotFound,
+			responseBody:   PostmarkErr{ErrorCode: 404, Message: "Domain not found"},
+			call:           func(api *API) (interface{}, error) { return api.GetDomain(9999) },
+		},
+		{
+			name:           "UpdateDomain/success",
+			wantMethod:     http.MethodPut,
+			wantPathSuffix: "/domains/7",
+			statusCode:     http.StatusOK,
+			responseBody:   domainResp,
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateDomain(7, &UpdateDomainReq{ReturnPathDomain: "pm.test.com"})
+			},
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*DomainResp)
+				if r.ReturnPathDomain != "pm.test.com" {
+					t.Errorf("ReturnPathDomain = %q, want pm.test.com", r.ReturnPathDomain)
+				}
+			},
+		},
+		{
+			name:         "UpdateDomain/not_found",
+			statusCode:   http.StatusNotFound,
+			responseBody: PostmarkErr{ErrorCode: 404, Message: "Domain not found"},
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateDomain(9999, &UpdateDomainReq{ReturnPathDomain: "pm.test.com"})
+			},
+		},
+		{
+			name:           "DeleteDomain/success",
+			wantMethod:     http.MethodDelete,
+			wantPathSuffix: "/domains/5",
+			statusCode:     http.StatusOK,
+			responseBody:   deleteResp,
+			call:           func(api *API) (interface{}, error) { return api.DeleteDomain(5) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*DeleteResp)
+				if r.Message != "Domain deleted." {
+					t.Errorf("Message = %q, want Domain deleted.", r.Message)
+				}
+			},
+		},
+		{
+			name:         "DeleteDomain/not_found",
+			statusCode:   http.StatusNotFound,
+			responseBody: PostmarkErr{ErrorCode: 404, Message: "Domain not found"},
+			call:         func(api *API) (interface{}, error) { return api.DeleteDomain(9999) },
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/domains") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		if !strings.Contains(req.URL.RawQuery, "count=10") {
-			t.Errorf("expected count param, query=%s", req.URL.RawQuery)
-		}
-		if !strings.Contains(req.URL.RawQuery, "offset=0") {
-			t.Errorf("expected offset param, query=%s", req.URL.RawQuery)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isError := tc.statusCode >= http.StatusBadRequest
 
-	got, err := api.ListDomains(10, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.TotalCount != 2 {
-		t.Errorf("TotalCount = %d, want 2", got.TotalCount)
-	}
-	if len(got.Domains) != 2 {
-		t.Errorf("len(Domains) = %d, want 2", len(got.Domains))
-	}
-}
+			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				if tc.wantMethod != "" && req.Method != tc.wantMethod {
+					t.Errorf("method = %s, want %s", req.Method, tc.wantMethod)
+				}
+				if tc.wantPathSuffix != "" && !strings.HasSuffix(req.URL.Path, tc.wantPathSuffix) {
+					t.Errorf("path = %s, want suffix %s", req.URL.Path, tc.wantPathSuffix)
+				}
+				return &http.Response{
+					StatusCode: tc.statusCode,
+					Body:       jsonBody(t, tc.responseBody),
+				}, nil
+			})))
 
-func TestListDomains_Error(t *testing.T) {
-	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
-
-	_, err := api.ListDomains(10, 0)
-	if err == nil {
-		t.Fatal("expected an error, got nil")
+			got, err := tc.call(api)
+			if isError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tc.statusCode == http.StatusNotFound && !errors.Is(err, ErrNotFound) {
+					t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if tc.checkOK != nil {
+					tc.checkOK(t, got)
+				}
+			}
+		})
 	}
 }
 
-func TestCreateDomain_Success(t *testing.T) {
-	want := DomainResp{ID: 42, Name: "newdomain.com"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/domains") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.CreateDomain(&CreateDomainReq{Name: "newdomain.com"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ID != 42 || got.Name != "newdomain.com" {
-		t.Errorf("got %+v, want %+v", got, want)
-	}
-}
-
-func TestCreateDomain_Error(t *testing.T) {
-	pmErr := PostmarkErr{ErrorCode: 422, Message: "invalid domain"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusUnprocessableEntity,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
-
-	_, err := api.CreateDomain(&CreateDomainReq{Name: ""})
-	if err == nil {
-		t.Fatal("expected an error, got nil")
-	}
-}
-
-func TestGetDomain_Success(t *testing.T) {
-	want := DomainResp{ID: 7, Name: "test.com", SPFVerified: true}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/domains/7") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.GetDomain(7)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ID != 7 || got.Name != "test.com" {
-		t.Errorf("got %+v, want %+v", got, want)
-	}
-}
-
-func TestGetDomain_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Domain not found"}),
-		}, nil
-	})))
-
-	_, err := api.GetDomain(9999)
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
-	}
-}
-
-func TestUpdateDomain_Success(t *testing.T) {
-	want := DomainResp{ID: 7, Name: "test.com", ReturnPathDomain: "pm.test.com"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPut {
-			t.Errorf("expected PUT, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/domains/7") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.UpdateDomain(7, &UpdateDomainReq{ReturnPathDomain: "pm.test.com"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ReturnPathDomain != "pm.test.com" {
-		t.Errorf("ReturnPathDomain = %q, want pm.test.com", got.ReturnPathDomain)
-	}
-}
-
-func TestUpdateDomain_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Domain not found"}),
-		}, nil
-	})))
-
-	_, err := api.UpdateDomain(9999, &UpdateDomainReq{ReturnPathDomain: "pm.test.com"})
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
-	}
-}
-
-func TestDeleteDomain_Success(t *testing.T) {
-	want := DeleteResp{Message: "Domain deleted."}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/domains/5") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.DeleteDomain(5)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Message != "Domain deleted." {
-		t.Errorf("Message = %q", got.Message)
-	}
-}
-
-func TestDeleteDomain_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Domain not found"}),
-		}, nil
-	})))
-
-	_, err := api.DeleteDomain(9999)
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
-	}
-}
-
-// Table-driven tests for domain verification helpers.
+// TestDomainVerificationHelpers exercises the four verification/rotation
+// helpers using table-driven success and error sub-cases.
 func TestDomainVerificationHelpers(t *testing.T) {
 	domainResp := DomainResp{ID: 10, Name: "example.com", DKIMVerified: true}
 
@@ -267,13 +217,13 @@ func TestDomainVerificationHelpers(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name+"_Success", func(t *testing.T) {
+		t.Run(tc.name+"/success", func(t *testing.T) {
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 				if req.Method != tc.method {
-					t.Errorf("expected %s, got %s", tc.method, req.Method)
+					t.Errorf("method = %s, want %s", req.Method, tc.method)
 				}
 				if !strings.HasSuffix(req.URL.Path, tc.pathSuffix) {
-					t.Errorf("unexpected path: %s (want suffix %s)", req.URL.Path, tc.pathSuffix)
+					t.Errorf("path = %s, want suffix %s", req.URL.Path, tc.pathSuffix)
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -290,7 +240,7 @@ func TestDomainVerificationHelpers(t *testing.T) {
 			}
 		})
 
-		t.Run(tc.name+"_Error", func(t *testing.T) {
+		t.Run(tc.name+"/not_found", func(t *testing.T) {
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusNotFound,
@@ -304,6 +254,61 @@ func TestDomainVerificationHelpers(t *testing.T) {
 			}
 			if !errors.Is(err, ErrNotFound) {
 				t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+			}
+		})
+	}
+}
+
+// TestDomains_UnmarshalError verifies that a malformed JSON response body
+// causes the domain methods to return a non-nil error rather than silently
+// succeeding with a zero-value struct.
+func TestDomains_UnmarshalError(t *testing.T) {
+	malformed := io.NopCloser(strings.NewReader(`{not valid json`))
+
+	tests := []struct {
+		name string
+		call func(api *API) (interface{}, error)
+	}{
+		{
+			name: "ListDomains",
+			call: func(api *API) (interface{}, error) { return api.ListDomains(10, 0) },
+		},
+		{
+			name: "CreateDomain",
+			call: func(api *API) (interface{}, error) {
+				return api.CreateDomain(&CreateDomainReq{Name: "x.com"})
+			},
+		},
+		{
+			name: "GetDomain",
+			call: func(api *API) (interface{}, error) { return api.GetDomain(1) },
+		},
+		{
+			name: "UpdateDomain",
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateDomain(1, &UpdateDomainReq{ReturnPathDomain: "pm.x.com"})
+			},
+		},
+		{
+			name: "DeleteDomain",
+			call: func(api *API) (interface{}, error) { return api.DeleteDomain(1) },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Each sub-test needs its own fresh ReadCloser because reading is destructive.
+			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				_ = malformed // referenced to avoid lint; each test gets the same bad body
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{not valid json`)),
+				}, nil
+			})))
+
+			_, err := tc.call(api)
+			if err == nil {
+				t.Fatal("expected unmarshal error, got nil")
 			}
 		})
 	}

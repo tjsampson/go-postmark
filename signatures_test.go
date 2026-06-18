@@ -2,241 +2,194 @@ package postmark
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
 
-func TestListSenderSignatures_Success(t *testing.T) {
-	want := ListSenderSignaturesResp{
+// TestSenderSignaturesCRUD exercises ListSenderSignatures, CreateSenderSignature,
+// GetSenderSignature, UpdateSenderSignature, and DeleteSenderSignature using
+// table-driven success and error sub-cases.
+func TestSenderSignaturesCRUD(t *testing.T) {
+	sigResp := SenderSignatureResp{ID: 55, EmailAddress: "sig@example.com", Name: "Sig"}
+	listResp := ListSenderSignaturesResp{
 		TotalCount: 2,
 		SenderSignatures: []SenderSignatureResp{
 			{ID: 1, EmailAddress: "sender1@example.com", Name: "Sender One"},
 			{ID: 2, EmailAddress: "sender2@example.com", Name: "Sender Two"},
 		},
 	}
+	deleteResp := DeleteResp{Message: "Signature removed."}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/senders") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		if !strings.Contains(req.URL.RawQuery, "count=10") {
-			t.Errorf("expected count param, query=%s", req.URL.RawQuery)
-		}
-		if !strings.Contains(req.URL.RawQuery, "offset=0") {
-			t.Errorf("expected offset param, query=%s", req.URL.RawQuery)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.ListSenderSignatures(10, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name           string
+		wantMethod     string
+		wantPathSuffix string
+		statusCode     int
+		responseBody   interface{}
+		call           func(api *API) (interface{}, error)
+		checkOK        func(t *testing.T, got interface{})
+	}{
+		{
+			name:           "ListSenderSignatures/success",
+			wantMethod:     http.MethodGet,
+			wantPathSuffix: "/senders",
+			statusCode:     http.StatusOK,
+			responseBody:   listResp,
+			call:           func(api *API) (interface{}, error) { return api.ListSenderSignatures(10, 0) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*ListSenderSignaturesResp)
+				if r.TotalCount != 2 {
+					t.Errorf("TotalCount = %d, want 2", r.TotalCount)
+				}
+				if len(r.SenderSignatures) != 2 {
+					t.Errorf("len(SenderSignatures) = %d, want 2", len(r.SenderSignatures))
+				}
+			},
+		},
+		{
+			name:         "ListSenderSignatures/error",
+			statusCode:   http.StatusInternalServerError,
+			responseBody: PostmarkErr{ErrorCode: 500, Message: "internal error"},
+			call:         func(api *API) (interface{}, error) { return api.ListSenderSignatures(10, 0) },
+		},
+		{
+			name:           "CreateSenderSignature/success",
+			wantMethod:     http.MethodPost,
+			wantPathSuffix: "/senders",
+			statusCode:     http.StatusOK,
+			responseBody:   SenderSignatureResp{ID: 99, EmailAddress: "new@example.com", Name: "New Sender"},
+			call: func(api *API) (interface{}, error) {
+				return api.CreateSenderSignature(&CreateSenderSignatureReq{
+					FromEmail: "new@example.com",
+					Name:      "New Sender",
+				})
+			},
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*SenderSignatureResp)
+				if r.ID != 99 || r.EmailAddress != "new@example.com" {
+					t.Errorf("got ID=%d EmailAddress=%s", r.ID, r.EmailAddress)
+				}
+			},
+		},
+		{
+			name:         "CreateSenderSignature/error",
+			statusCode:   http.StatusUnprocessableEntity,
+			responseBody: PostmarkErr{ErrorCode: 422, Message: "invalid email"},
+			call: func(api *API) (interface{}, error) {
+				return api.CreateSenderSignature(&CreateSenderSignatureReq{FromEmail: "bad"})
+			},
+		},
+		{
+			name:           "GetSenderSignature/success",
+			wantMethod:     http.MethodGet,
+			wantPathSuffix: "/senders/55",
+			statusCode:     http.StatusOK,
+			responseBody:   sigResp,
+			call:           func(api *API) (interface{}, error) { return api.GetSenderSignature(55) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*SenderSignatureResp)
+				if r.ID != 55 {
+					t.Errorf("ID = %d, want 55", r.ID)
+				}
+			},
+		},
+		{
+			name:         "GetSenderSignature/not_found",
+			statusCode:   http.StatusNotFound,
+			responseBody: PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"},
+			call:         func(api *API) (interface{}, error) { return api.GetSenderSignature(9999) },
+		},
+		{
+			name:           "UpdateSenderSignature/success",
+			wantMethod:     http.MethodPut,
+			wantPathSuffix: "/senders/55",
+			statusCode:     http.StatusOK,
+			responseBody:   SenderSignatureResp{ID: 55, EmailAddress: "sig@example.com", Name: "Updated Sig"},
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateSenderSignature(55, &UpdateSenderSignatureReq{Name: "Updated Sig"})
+			},
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*SenderSignatureResp)
+				if r.Name != "Updated Sig" {
+					t.Errorf("Name = %q, want Updated Sig", r.Name)
+				}
+			},
+		},
+		{
+			name:         "UpdateSenderSignature/not_found",
+			statusCode:   http.StatusNotFound,
+			responseBody: PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"},
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateSenderSignature(9999, &UpdateSenderSignatureReq{Name: "Ghost"})
+			},
+		},
+		{
+			name:           "DeleteSenderSignature/success",
+			wantMethod:     http.MethodDelete,
+			wantPathSuffix: "/senders/33",
+			statusCode:     http.StatusOK,
+			responseBody:   deleteResp,
+			call:           func(api *API) (interface{}, error) { return api.DeleteSenderSignature(33) },
+			checkOK: func(t *testing.T, got interface{}) {
+				r := got.(*DeleteResp)
+				if r.Message != "Signature removed." {
+					t.Errorf("Message = %q", r.Message)
+				}
+			},
+		},
+		{
+			name:         "DeleteSenderSignature/not_found",
+			statusCode:   http.StatusNotFound,
+			responseBody: PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"},
+			call:         func(api *API) (interface{}, error) { return api.DeleteSenderSignature(9999) },
+		},
 	}
-	if got.TotalCount != 2 {
-		t.Errorf("TotalCount = %d, want 2", got.TotalCount)
-	}
-	if len(got.SenderSignatures) != 2 {
-		t.Errorf("len(SenderSignatures) = %d, want 2", len(got.SenderSignatures))
-	}
-}
 
-func TestListSenderSignatures_Error(t *testing.T) {
-	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isError := tc.statusCode >= http.StatusBadRequest
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
+			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				if tc.wantMethod != "" && req.Method != tc.wantMethod {
+					t.Errorf("method = %s, want %s", req.Method, tc.wantMethod)
+				}
+				if tc.wantPathSuffix != "" && !strings.HasSuffix(req.URL.Path, tc.wantPathSuffix) {
+					t.Errorf("path = %s, want suffix %s", req.URL.Path, tc.wantPathSuffix)
+				}
+				return &http.Response{
+					StatusCode: tc.statusCode,
+					Body:       jsonBody(t, tc.responseBody),
+				}, nil
+			})))
 
-	_, err := api.ListSenderSignatures(10, 0)
-	if err == nil {
-		t.Fatal("expected an error, got nil")
-	}
-}
-
-func TestCreateSenderSignature_Success(t *testing.T) {
-	want := SenderSignatureResp{ID: 99, EmailAddress: "new@example.com", Name: "New Sender"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/senders") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.CreateSenderSignature(&CreateSenderSignatureReq{
-		FromEmail: "new@example.com",
-		Name:      "New Sender",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ID != 99 || got.EmailAddress != "new@example.com" {
-		t.Errorf("got %+v, want %+v", got, want)
-	}
-}
-
-func TestCreateSenderSignature_Error(t *testing.T) {
-	pmErr := PostmarkErr{ErrorCode: 422, Message: "invalid email"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusUnprocessableEntity,
-			Body:       jsonBody(t, pmErr),
-		}, nil
-	})))
-
-	_, err := api.CreateSenderSignature(&CreateSenderSignatureReq{FromEmail: "bad"})
-	if err == nil {
-		t.Fatal("expected an error, got nil")
-	}
-}
-
-func TestGetSenderSignature_Success(t *testing.T) {
-	want := SenderSignatureResp{ID: 55, EmailAddress: "sig@example.com", Name: "Sig"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/senders/55") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.GetSenderSignature(55)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ID != 55 {
-		t.Errorf("ID = %d, want 55", got.ID)
-	}
-}
-
-func TestGetSenderSignature_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"}),
-		}, nil
-	})))
-
-	_, err := api.GetSenderSignature(9999)
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
-	}
-}
-
-func TestUpdateSenderSignature_Success(t *testing.T) {
-	want := SenderSignatureResp{ID: 55, EmailAddress: "sig@example.com", Name: "Updated Sig"}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPut {
-			t.Errorf("expected PUT, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/senders/55") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.UpdateSenderSignature(55, &UpdateSenderSignatureReq{Name: "Updated Sig"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Name != "Updated Sig" {
-		t.Errorf("Name = %q, want Updated Sig", got.Name)
-	}
-}
-
-func TestUpdateSenderSignature_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"}),
-		}, nil
-	})))
-
-	_, err := api.UpdateSenderSignature(9999, &UpdateSenderSignatureReq{Name: "Ghost"})
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+			got, err := tc.call(api)
+			if isError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tc.statusCode == http.StatusNotFound && !errors.Is(err, ErrNotFound) {
+					t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if tc.checkOK != nil {
+					tc.checkOK(t, got)
+				}
+			}
+		})
 	}
 }
 
-func TestDeleteSenderSignature_Success(t *testing.T) {
-	want := DeleteResp{Message: "Signature removed."}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "/senders/33") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.DeleteSenderSignature(33)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Message != "Signature removed." {
-		t.Errorf("Message = %q", got.Message)
-	}
-}
-
-func TestDeleteSenderSignature_NotFound(t *testing.T) {
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"}),
-		}, nil
-	})))
-
-	_, err := api.DeleteSenderSignature(9999)
-	if err == nil {
-		t.Fatal("expected ErrNotFound, got nil")
-	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
-	}
-}
-
-// Table-driven tests for sender signature helper operations.
+// TestSenderSignatureHelpers exercises ResendSenderSignatureConfirmation,
+// VerifySenderSignatureSPF, and RequestNewDKIMForSenderSignature using
+// table-driven success and error sub-cases.
 func TestSenderSignatureHelpers(t *testing.T) {
 	sigResp := SenderSignatureResp{ID: 10, EmailAddress: "helper@example.com", SPFVerified: true}
-	deleteRespVal := DeleteResp{Message: "confirmation sent"}
+	resendResp := DeleteResp{Message: "confirmation sent"}
 
 	tests := []struct {
 		name           string
@@ -273,18 +226,18 @@ func TestSenderSignatureHelpers(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name+"_Success", func(t *testing.T) {
+		t.Run(tc.name+"/success", func(t *testing.T) {
 			var respBody interface{} = sigResp
 			if tc.returnsDelResp {
-				respBody = deleteRespVal
+				respBody = resendResp
 			}
 
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 				if req.Method != tc.method {
-					t.Errorf("expected %s, got %s", tc.method, req.Method)
+					t.Errorf("method = %s, want %s", req.Method, tc.method)
 				}
 				if !strings.HasSuffix(req.URL.Path, tc.pathSuffix) {
-					t.Errorf("unexpected path: %s (want suffix %s)", req.URL.Path, tc.pathSuffix)
+					t.Errorf("path = %s, want suffix %s", req.URL.Path, tc.pathSuffix)
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -301,7 +254,7 @@ func TestSenderSignatureHelpers(t *testing.T) {
 			}
 		})
 
-		t.Run(tc.name+"_Error", func(t *testing.T) {
+		t.Run(tc.name+"/not_found", func(t *testing.T) {
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusNotFound,
@@ -315,6 +268,68 @@ func TestSenderSignatureHelpers(t *testing.T) {
 			}
 			if !errors.Is(err, ErrNotFound) {
 				t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+			}
+		})
+	}
+}
+
+// TestSenderSignatures_UnmarshalError verifies that a malformed JSON response
+// causes sender signature methods to return a non-nil error.
+func TestSenderSignatures_UnmarshalError(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(api *API) (interface{}, error)
+	}{
+		{
+			name: "ListSenderSignatures",
+			call: func(api *API) (interface{}, error) { return api.ListSenderSignatures(10, 0) },
+		},
+		{
+			name: "CreateSenderSignature",
+			call: func(api *API) (interface{}, error) {
+				return api.CreateSenderSignature(&CreateSenderSignatureReq{FromEmail: "x@x.com", Name: "X"})
+			},
+		},
+		{
+			name: "GetSenderSignature",
+			call: func(api *API) (interface{}, error) { return api.GetSenderSignature(1) },
+		},
+		{
+			name: "UpdateSenderSignature",
+			call: func(api *API) (interface{}, error) {
+				return api.UpdateSenderSignature(1, &UpdateSenderSignatureReq{Name: "Y"})
+			},
+		},
+		{
+			name: "DeleteSenderSignature",
+			call: func(api *API) (interface{}, error) { return api.DeleteSenderSignature(1) },
+		},
+		{
+			name: "ResendSenderSignatureConfirmation",
+			call: func(api *API) (interface{}, error) { return api.ResendSenderSignatureConfirmation(1) },
+		},
+		{
+			name: "VerifySenderSignatureSPF",
+			call: func(api *API) (interface{}, error) { return api.VerifySenderSignatureSPF(1) },
+		},
+		{
+			name: "RequestNewDKIMForSenderSignature",
+			call: func(api *API) (interface{}, error) { return api.RequestNewDKIMForSenderSignature(1) },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{not valid json`)),
+				}, nil
+			})))
+
+			_, err := tc.call(api)
+			if err == nil {
+				t.Fatal("expected unmarshal error, got nil")
 			}
 		})
 	}
