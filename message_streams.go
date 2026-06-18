@@ -1,9 +1,11 @@
 package postmark
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -20,6 +22,8 @@ const (
 	// MessageStreamTypeBroadcasts is used for broadcast / bulk email streams.
 	MessageStreamTypeBroadcasts MessageStreamType = "Broadcasts"
 	// MessageStreamTypeInboundSpam is used for inbound spam streams.
+	// This is a Postmark-defined stream type for processing inbound spam;
+	// it is included here for completeness but is not typically user-created.
 	MessageStreamTypeInboundSpam MessageStreamType = "InboundSpam"
 )
 
@@ -38,8 +42,8 @@ type (
 		Description                         string                               `json:"Description"`
 		MessageStreamType                   MessageStreamType                    `json:"MessageStreamType"`
 		CreatedAt                           time.Time                            `json:"CreatedAt"`
-		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
-		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
+		ArchivedAt                          *time.Time                           `json:"ArchivedAt,omitempty"`
+		ExpungeAt                           *time.Time                           `json:"ExpungeAt,omitempty"`
 		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration,omitempty"`
 	}
 
@@ -52,7 +56,8 @@ type (
 
 	// CreateMessageStreamReq is the request body for creating a new message stream.
 	CreateMessageStreamReq struct {
-		ID                                  string                               `json:"ID"`
+		// ID is the unique slug for the new stream. It must not be empty.
+		ID                                  string                               `json:"ID,omitempty"`
 		Name                                string                               `json:"Name"`
 		Description                         string                               `json:"Description,omitempty"`
 		MessageStreamType                   MessageStreamType                    `json:"MessageStreamType"`
@@ -72,24 +77,48 @@ type (
 	MessageStreamArchiveResp struct {
 		ID        string     `json:"ID"`
 		ServerID  int        `json:"ServerID"`
-		ExpungeAt *time.Time `json:"ExpungeAt"`
+		ExpungeAt *time.Time `json:"ExpungeAt,omitempty"`
 	}
 )
 
 // errEmptyStreamID is returned by any method that requires a non-empty stream ID.
 var errEmptyStreamID = errors.New("streamID must not be empty")
 
-// newServerRequest is like newRequest but replaces the X-Postmark-Account-Token
-// header with X-Postmark-Server-Token, as required by the Message Streams and
-// Suppressions endpoints. a.token is expected to hold the server-level API token
-// (set via APITokenOpt or the POSTMARK_API_TOKEN environment variable).
+// errNilCreateReq is returned when a nil *CreateMessageStreamReq is passed.
+var errNilCreateReq = errors.New("CreateMessageStreamReq must not be nil")
+
+// errNilUpdateReq is returned when a nil *UpdateMessageStreamReq is passed.
+var errNilUpdateReq = errors.New("UpdateMessageStreamReq must not be nil")
+
+// newServerRequest builds an *http.Request that carries X-Postmark-Server-Token
+// (not X-Postmark-Account-Token) as required by the Message Streams and
+// Suppressions endpoints. It is a dedicated builder that never touches the
+// account-level auth header, avoiding the fragility of deleting a header that
+// may or may not have been set by a base helper.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
-	req, err := a.newRequest(method, path, body)
+	var reqBody io.Reader = http.NoBody
+	hasBody := body != nil
+	if hasBody {
+		reqPayload, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(reqPayload)
+	}
+
+	req, err := http.NewRequest(
+		method,
+		fmt.Sprintf("%s/%s", a.baseHost, path),
+		reqBody,
+	)
 	if err != nil {
 		return nil, err
 	}
-	// Replace the account-level token header with the server-level token header.
-	req.Header.Del("X-Postmark-Account-Token")
+	req.Header.Set("Accept", "application/json")
+	if hasBody {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	// Message Streams endpoints authenticate with the server-level token.
 	req.Header.Set("X-Postmark-Server-Token", a.token)
 	return req, nil
 }
@@ -108,7 +137,7 @@ func (a *API) ListMessageStreams(streamType string, includeArchived bool) (*List
 
 	path := "message-streams"
 	if len(params) > 0 {
-		path = path + "?" + params.Encode()
+		path += "?" + params.Encode()
 	}
 
 	req, err := a.newServerRequest(http.MethodGet, path, nil)
@@ -152,11 +181,12 @@ func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
 }
 
 // CreateMessageStream creates a new message stream with the settings in req.
-// req must not be nil; passing nil will return an error before any network call.
-// It returns the full MessageStreamResp on success.
+// req must not be nil; passing nil will return errNilCreateReq immediately,
+// before any network call. req.ID must not be empty. It returns the full
+// MessageStreamResp on success.
 func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamResp, error) {
 	if req == nil {
-		return nil, fmt.Errorf("CreateMessageStreamReq must not be nil")
+		return nil, errNilCreateReq
 	}
 
 	httpReq, err := a.newServerRequest(http.MethodPost, "message-streams", req)
@@ -178,13 +208,14 @@ func (a *API) CreateMessageStream(req *CreateMessageStreamReq) (*MessageStreamRe
 
 // UpdateMessageStream applies the changes in req to the message stream
 // identified by streamID and returns the updated MessageStreamResp.
-// req must not be nil; passing nil will return an error before any network call.
+// req must not be nil; passing nil will return errNilUpdateReq immediately,
+// before any network call.
 func (a *API) UpdateMessageStream(streamID string, req *UpdateMessageStreamReq) (*MessageStreamResp, error) {
 	if streamID == "" {
 		return nil, errEmptyStreamID
 	}
 	if req == nil {
-		return nil, fmt.Errorf("UpdateMessageStreamReq must not be nil")
+		return nil, errNilUpdateReq
 	}
 
 	httpReq, err := a.newServerRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", url.PathEscape(streamID)), req)
@@ -213,7 +244,7 @@ func (a *API) ArchiveMessageStream(streamID string) (*MessageStreamArchiveResp, 
 		return nil, errEmptyStreamID
 	}
 
-	// Pass an empty struct so newRequest sets Content-Type: application/json
+	// Pass an empty struct so newServerRequest sets Content-Type: application/json
 	// and sends `{}` as the body, satisfying Postmark's POST requirements.
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,
@@ -245,7 +276,7 @@ func (a *API) UnarchiveMessageStream(streamID string) (*MessageStreamResp, error
 		return nil, errEmptyStreamID
 	}
 
-	// Pass an empty struct so newRequest sets Content-Type: application/json
+	// Pass an empty struct so newServerRequest sets Content-Type: application/json
 	// and sends `{}` as the body, satisfying Postmark's POST requirements.
 	httpReq, err := a.newServerRequest(
 		http.MethodPost,

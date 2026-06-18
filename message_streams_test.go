@@ -55,6 +55,10 @@ func TestListMessageStreams_Success(t *testing.T) {
 	if got.MessageStreams[0].ID != "outbound" {
 		t.Errorf("MessageStreams[0].ID = %q, want outbound", got.MessageStreams[0].ID)
 	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.MessageStreams[0].CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", got.MessageStreams[0].CreatedAt, now)
+	}
 }
 
 func TestListMessageStreams_WithStreamTypeFilter(t *testing.T) {
@@ -64,8 +68,9 @@ func TestListMessageStreams_WithStreamTypeFilter(t *testing.T) {
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.RawQuery, "MessageStreamType=Transactional") {
-			t.Errorf("expected MessageStreamType query param, query=%s", req.URL.RawQuery)
+		// Assert the MessageStreamType query parameter is actually present.
+		if req.URL.Query().Get("MessageStreamType") != "Transactional" {
+			t.Errorf("expected MessageStreamType=Transactional, query=%s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -86,8 +91,8 @@ func TestListMessageStreams_IncludeArchived(t *testing.T) {
 	want := ListMessageStreamsResp{TotalCount: 0, MessageStreams: []MessageStreamResp{}}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.RawQuery, "IncludeArchivedStreams=true") {
-			t.Errorf("expected IncludeArchivedStreams param, query=%s", req.URL.RawQuery)
+		if req.URL.Query().Get("IncludeArchivedStreams") != "true" {
+			t.Errorf("expected IncludeArchivedStreams=true param, query=%s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -165,6 +170,10 @@ func TestGetMessageStream_Success(t *testing.T) {
 	if got.MessageStreamType != MessageStreamTypeTransactional {
 		t.Errorf("MessageStreamType = %q, want Transactional", got.MessageStreamType)
 	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, now)
+	}
 }
 
 func TestGetMessageStream_EmptyID(t *testing.T) {
@@ -236,15 +245,19 @@ func TestCreateMessageStream_Success(t *testing.T) {
 	if got.Name != "My Stream" {
 		t.Errorf("Name = %q, want My Stream", got.Name)
 	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, now)
+	}
 }
 
-// TestCreateMessageStream_NilReq verifies that passing a nil request returns an
-// error immediately without making a network call.
+// TestCreateMessageStream_NilReq verifies that passing a nil request returns
+// errNilCreateReq immediately without making a network call.
 func TestCreateMessageStream_NilReq(t *testing.T) {
 	api := New()
 	_, err := api.CreateMessageStream(nil)
-	if err == nil {
-		t.Fatal("expected an error for nil request, got nil")
+	if !errors.Is(err, errNilCreateReq) {
+		t.Errorf("expected errNilCreateReq, got %v", err)
 	}
 }
 
@@ -355,13 +368,13 @@ func TestUpdateMessageStream_EmptyID(t *testing.T) {
 	}
 }
 
-// TestUpdateMessageStream_NilReq verifies that passing a nil request returns an
-// error immediately without making a network call.
+// TestUpdateMessageStream_NilReq verifies that passing a nil request returns
+// errNilUpdateReq immediately without making a network call.
 func TestUpdateMessageStream_NilReq(t *testing.T) {
 	api := New()
 	_, err := api.UpdateMessageStream("outbound", nil)
-	if err == nil {
-		t.Fatal("expected an error for nil request, got nil")
+	if !errors.Is(err, errNilUpdateReq) {
+		t.Errorf("expected errNilUpdateReq, got %v", err)
 	}
 }
 
@@ -417,7 +430,11 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 		t.Errorf("ID = %q, want outbound", got.ID)
 	}
 	if got.ExpungeAt == nil {
-		t.Error("expected ExpungeAt to be non-nil")
+		t.Fatal("expected ExpungeAt to be non-nil")
+	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.ExpungeAt.Equal(expungeAt) {
+		t.Errorf("ExpungeAt = %v, want %v", got.ExpungeAt, expungeAt)
 	}
 }
 
@@ -480,6 +497,10 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	}
 	if got.ID != "outbound" {
 		t.Errorf("ID = %q, want outbound", got.ID)
+	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, now)
 	}
 }
 
@@ -557,6 +578,10 @@ func TestListSuppressions_Success(t *testing.T) {
 	if got.Suppressions[0].Origin != "Recipient" {
 		t.Errorf("Origin = %q, want Recipient", got.Suppressions[0].Origin)
 	}
+	// Use .Equal() to compare time.Time values: avoids location metadata mismatches.
+	if !got.Suppressions[0].CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", got.Suppressions[0].CreatedAt, now)
+	}
 }
 
 func TestListSuppressions_EmptyID(t *testing.T) {
@@ -571,21 +596,21 @@ func TestListSuppressions_WithParams(t *testing.T) {
 	want := SuppressionsResp{Suppressions: []SuppressionEntry{}}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		q := req.URL.RawQuery
-		if !strings.Contains(q, "SuppressionReason=HardBounce") {
-			t.Errorf("expected SuppressionReason param, query=%s", q)
+		q := req.URL.Query()
+		if q.Get("SuppressionReason") != "HardBounce" {
+			t.Errorf("expected SuppressionReason=HardBounce, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(q, "Origin=Recipient") {
-			t.Errorf("expected Origin param, query=%s", q)
+		if q.Get("Origin") != "Recipient" {
+			t.Errorf("expected Origin=Recipient, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(q, "EmailAddress=test%40example.com") {
-			t.Errorf("expected EmailAddress param, query=%s", q)
+		if q.Get("EmailAddress") != "test@example.com" {
+			t.Errorf("expected EmailAddress=test@example.com, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(q, "FromDate=2024-01-01") {
-			t.Errorf("expected FromDate param, query=%s", q)
+		if q.Get("FromDate") != "2024-01-01" {
+			t.Errorf("expected FromDate=2024-01-01, query=%s", req.URL.RawQuery)
 		}
-		if !strings.Contains(q, "ToDate=2024-12-31") {
-			t.Errorf("expected ToDate param, query=%s", q)
+		if q.Get("ToDate") != "2024-12-31" {
+			t.Errorf("expected ToDate=2024-12-31, query=%s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
