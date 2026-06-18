@@ -52,6 +52,25 @@ func TestListDomains_Success(t *testing.T) {
 	}
 }
 
+// TestListDomains_InvalidCount verifies that passing count < 1 returns an
+// error immediately without making an HTTP request.
+func TestListDomains_InvalidCount(t *testing.T) {
+	for _, count := range []int{0, -1, -100} {
+		count := count
+		t.Run(fmt.Sprintf("count=%d", count), func(t *testing.T) {
+			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				t.Errorf("HTTP request should not be made for count=%d", count)
+				return nil, nil
+			})))
+
+			_, err := api.ListDomains(count, 0)
+			if err == nil {
+				t.Fatalf("expected an error for count=%d, got nil", count)
+			}
+		})
+	}
+}
+
 func TestListDomains_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -338,6 +357,20 @@ func TestUpdateDomain_EmptyReq(t *testing.T) {
 	_, err := api.UpdateDomain(7, &UpdateDomainReq{})
 	if err == nil {
 		t.Fatal("expected an error for empty UpdateDomainReq, got nil")
+	}
+}
+
+// TestUpdateDomain_NilReq verifies that passing a nil *UpdateDomainReq returns
+// an error immediately rather than dereferencing a nil pointer.
+func TestUpdateDomain_NilReq(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for a nil UpdateDomainReq")
+		return nil, nil
+	})))
+
+	_, err := api.UpdateDomain(7, nil)
+	if err == nil {
+		t.Fatal("expected an error for nil UpdateDomainReq, got nil")
 	}
 }
 

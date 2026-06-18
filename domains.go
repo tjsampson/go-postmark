@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 )
 
@@ -39,7 +38,7 @@ type (
 	// UpdateDomainReq is the request body for updating an existing Postmark Domain.
 	// All fields are optional; fields left at their zero value are omitted from
 	// the JSON body via omitempty.  Callers must set at least one field;
-	// UpdateDomain returns an error if the struct equals its zero value.
+	// UpdateDomain returns an error if the struct is nil or equals its zero value.
 	UpdateDomainReq struct {
 		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
 	}
@@ -49,12 +48,21 @@ type (
 		TotalCount int          `json:"TotalCount"`
 		Domains    []DomainResp `json:"Domains"`
 	}
+
+	// emptyBody is a named sentinel type used as the JSON body for POST endpoints
+	// that require a Content-Type: application/json header but accept no input
+	// fields (e.g. verifyspf, rotatedkim).  Using a named type rather than an
+	// anonymous struct{}{}  makes the intent explicit at each call site.
+	emptyBody struct{}
 )
 
 // ListDomains returns a paginated list of all Postmark Domains on the account.
 // count controls the page size and offset controls the starting position.
 // count must be at least 1; the Postmark API rejects count=0.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
+	if count < 1 {
+		return nil, fmt.Errorf("postmark: ListDomains count must be at least 1, got %d", count)
+	}
 	req, err := a.newRequest(http.MethodGet, "domains", nil)
 	if err != nil {
 		return nil, err
@@ -115,10 +123,10 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 
 // UpdateDomain applies the changes in req to the Postmark Domain identified
 // by domainID and returns the updated DomainResp.
-// It returns an error immediately if req is entirely zero-valued, since
+// It returns an error immediately if req is nil or entirely zero-valued, since
 // submitting an empty JSON object would be a silent no-op.
 func (a *API) UpdateDomain(domainID int, req *UpdateDomainReq) (*DomainResp, error) {
-	if reflect.DeepEqual(req, &UpdateDomainReq{}) {
+	if req == nil || *req == (UpdateDomainReq{}) {
 		return nil, fmt.Errorf("postmark: UpdateDomainReq has no fields to update")
 	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d", domainID), req)
@@ -158,6 +166,10 @@ func (a *API) DeleteDomain(domainID int) (*DeleteResp, error) {
 
 // VerifyDomainDkim triggers DKIM verification for the Postmark Domain
 // identified by domainID.
+// Note: the path segment "verifyDkim" is camelCase as specified by the
+// Postmark API, unlike the all-lowercase "verifyspf" and "rotatedkim" paths
+// used by other endpoints in this file — the inconsistency originates from
+// Postmark's own API surface and is reproduced faithfully here.
 func (a *API) VerifyDomainDkim(domainID int) (*DomainResp, error) {
 	req, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d/verifyDkim", domainID), nil)
 	if err != nil {
@@ -195,12 +207,12 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 }
 
 // VerifyDomainSPF triggers SPF verification for the Postmark Domain
-// identified by domainID.  An empty JSON object body is sent so that
+// identified by domainID.  An emptyBody value is sent so that
 // Content-Type: application/json is set on the POST request, as required by
 // the Postmark API for POST endpoints (see newRequest: Content-Type is only
 // set when body != nil).
 func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), struct{}{})
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), emptyBody{})
 	if err != nil {
 		return nil, err
 	}
@@ -217,12 +229,12 @@ func (a *API) VerifyDomainSPF(domainID int) (*DomainResp, error) {
 }
 
 // RotateDomainDKIM initiates a DKIM key rotation for the Postmark Domain
-// identified by domainID.  An empty JSON object body is sent so that
+// identified by domainID.  An emptyBody value is sent so that
 // Content-Type: application/json is set on the POST request, as required by
 // the Postmark API for POST endpoints (see newRequest: Content-Type is only
 // set when body != nil).
 func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotatedkim", domainID), struct{}{})
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/rotatedkim", domainID), emptyBody{})
 	if err != nil {
 		return nil, err
 	}
