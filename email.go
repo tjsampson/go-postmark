@@ -3,6 +3,7 @@ package postmark
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -89,6 +90,9 @@ const maxBatchSize = 500
 
 // SendEmail sends a single email via the Postmark API (POST /email).
 // It uses the server token (X-Postmark-Server-Token) for authentication.
+// If the HTTP response is 2xx but the Postmark ErrorCode is non-zero,
+// SendEmail returns a non-nil error so callers are never silently given a
+// failed send with a nil error.
 func (a *API) SendEmail(req *EmailReq) (*EmailResp, error) {
 	httpReq, err := a.newServerRequest(http.MethodPost, "email", req)
 	if err != nil {
@@ -104,17 +108,29 @@ func (a *API) SendEmail(req *EmailReq) (*EmailResp, error) {
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
+
+	// Postmark can return HTTP 200 with a non-zero ErrorCode for API-level
+	// failures (e.g. invalid recipient address). Surface these as errors so
+	// callers are not surprised by a nil error paired with a failed send.
+	if data.ErrorCode != 0 {
+		return nil, &PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
+	}
+
 	return &data, nil
 }
 
 // SendEmailBatch sends a batch of up to 500 emails via the Postmark API
-// (POST /email/batch). It returns an error immediately if more than 500
-// messages are supplied, matching the Postmark API limit.
+// (POST /email/batch). It returns an error immediately if the slice is empty
+// or contains more than 500 messages, avoiding a pointless round-trip.
 // Each element in the returned BatchEmailResp corresponds to one email in
-// the request slice.
-func (a *API) SendEmailBatch(reqs []*EmailReq) (BatchEmailResp, error) {
+// the request slice. Note that individual elements may carry a non-zero
+// ErrorCode; callers should inspect each EmailResp in the returned slice.
+func (a *API) SendEmailBatch(reqs []EmailReq) (BatchEmailResp, error) {
+	if len(reqs) == 0 {
+		return nil, errors.New("postmark: batch must contain at least one message")
+	}
 	if len(reqs) > maxBatchSize {
-		return nil, errors.New("postmark: batch size exceeds 500")
+		return nil, fmt.Errorf("postmark: batch size %d exceeds maximum of %d", len(reqs), maxBatchSize)
 	}
 
 	httpReq, err := a.newServerRequest(http.MethodPost, "email/batch", reqs)

@@ -138,6 +138,68 @@ func TestSendEmail_Success(t *testing.T) {
 	}
 }
 
+// TestSendEmail_PostmarkErrorCode verifies that SendEmail returns a non-nil
+// error when Postmark responds with HTTP 200 but a non-zero ErrorCode in the
+// body. This is a common Postmark pattern for API-level validation failures.
+func TestSendEmail_PostmarkErrorCode(t *testing.T) {
+	tests := []struct {
+		name           string
+		responseBody   EmailResp
+		wantErrContain string
+	}{
+		{
+			name: "invalid recipient",
+			responseBody: EmailResp{
+				ErrorCode: 300,
+				Message:   "Invalid email request",
+			},
+			wantErrContain: "Invalid email request",
+		},
+		{
+			name: "inactive recipient",
+			responseBody: EmailResp{
+				ErrorCode: 406,
+				Message:   "You tried to send to a recipient that has been marked as inactive",
+			},
+			wantErrContain: "inactive",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.responseBody),
+					}, nil
+				})),
+			)
+
+			_, err := api.SendEmail(&EmailReq{
+				From:    "sender@example.com",
+				To:      "recipient@example.com",
+				Subject: "Test",
+			})
+
+			if err == nil {
+				t.Fatal("expected an error for non-zero ErrorCode, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContain) {
+				t.Errorf("expected error to contain %q, got %q", tc.wantErrContain, err.Error())
+			}
+			// The returned error must be (or wrap) a *PostmarkErr.
+			var pmErr *PostmarkErr
+			if !errors.As(err, &pmErr) {
+				t.Errorf("expected error to be *PostmarkErr, got %T: %v", err, err)
+			} else if pmErr.ErrorCode != tc.responseBody.ErrorCode {
+				t.Errorf("PostmarkErr.ErrorCode = %d, want %d", pmErr.ErrorCode, tc.responseBody.ErrorCode)
+			}
+		})
+	}
+}
+
 func TestSendEmail_APIError(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -211,12 +273,12 @@ func TestSendEmail_APIError(t *testing.T) {
 func TestSendEmailBatch_Success(t *testing.T) {
 	tests := []struct {
 		name string
-		reqs []*EmailReq
+		reqs []EmailReq
 		want BatchEmailResp
 	}{
 		{
 			name: "single message batch",
-			reqs: []*EmailReq{
+			reqs: []EmailReq{
 				{
 					From:     "sender@example.com",
 					To:       "recipient@example.com",
@@ -236,7 +298,7 @@ func TestSendEmailBatch_Success(t *testing.T) {
 		},
 		{
 			name: "multiple messages batch",
-			reqs: []*EmailReq{
+			reqs: []EmailReq{
 				{From: "a@example.com", To: "b@example.com", Subject: "Msg 1", TextBody: "Body 1"},
 				{From: "a@example.com", To: "c@example.com", Subject: "Msg 2", TextBody: "Body 2"},
 				{From: "a@example.com", To: "d@example.com", Subject: "Msg 3", HTMLBody: "<p>Body 3</p>"},
@@ -246,11 +308,6 @@ func TestSendEmailBatch_Success(t *testing.T) {
 				{To: "c@example.com", MessageID: "batch-2", ErrorCode: 0, Message: "OK"},
 				{To: "d@example.com", MessageID: "batch-3", ErrorCode: 0, Message: "OK"},
 			},
-		},
-		{
-			name: "empty batch",
-			reqs: []*EmailReq{},
-			want: BatchEmailResp{},
 		},
 	}
 
@@ -302,14 +359,34 @@ func TestSendEmailBatch_Success(t *testing.T) {
 	}
 }
 
+// TestSendEmailBatch_EmptySlice asserts that SendEmailBatch returns an error
+// immediately when an empty slice is supplied, without making any HTTP request.
+func TestSendEmailBatch_EmptySlice(t *testing.T) {
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called for an empty batch")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.SendEmailBatch([]EmailReq{})
+	if err == nil {
+		t.Fatal("expected an error for empty batch, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one message") {
+		t.Errorf("expected error message to mention empty batch, got: %v", err)
+	}
+}
+
 // TestSendEmailBatch_ExceedsMaxSize asserts that SendEmailBatch returns an
 // error immediately when more than 500 messages are supplied, without making
 // any HTTP request.
 func TestSendEmailBatch_ExceedsMaxSize(t *testing.T) {
 	// Build a slice of 501 minimal EmailReq values.
-	reqs := make([]*EmailReq, 501)
+	reqs := make([]EmailReq, 501)
 	for i := range reqs {
-		reqs[i] = &EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
+		reqs[i] = EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
 	}
 
 	// The mock transport must never be called; if it is, fail loudly.
@@ -325,7 +402,7 @@ func TestSendEmailBatch_ExceedsMaxSize(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for batch size > 500, got nil")
 	}
-	if !strings.Contains(err.Error(), "batch size exceeds 500") {
+	if !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Errorf("expected error message to mention batch size limit, got: %v", err)
 	}
 }
@@ -370,7 +447,7 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 				})),
 			)
 
-			_, err := api.SendEmailBatch([]*EmailReq{
+			_, err := api.SendEmailBatch([]EmailReq{
 				{From: "a@example.com", To: "b@example.com", Subject: "Test"},
 			})
 
@@ -394,10 +471,10 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 // dropped by omitempty), and that a nil value omits the field entirely.
 func TestTrackOpens_Serialisation(t *testing.T) {
 	tests := []struct {
-		name        string
-		trackOpens  *bool
-		wantInBody  string
-		wantAbsent  string
+		name       string
+		trackOpens *bool
+		wantInBody string
+		wantAbsent string
 	}{
 		{
 			name:       "explicit false is serialised",
