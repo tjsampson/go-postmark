@@ -11,8 +11,8 @@ import (
 
 type (
 	// TemplateResp represents a Postmark Template as returned by the API.
-	// When no alias is set, Alias is an empty string (the API returns null,
-	// which Go decodes to the zero value).
+	// When no alias or layout template is set, those fields decode to an empty
+	// string (the API returns null, which Go decodes to the zero value).
 	TemplateResp struct {
 		TemplateID         int    `json:"TemplateId"`
 		Name               string `json:"Name"`
@@ -49,6 +49,8 @@ type (
 	}
 
 	// TemplateListItem is a summary entry returned by ListTemplates.
+	// When no alias or layout template is set, those fields decode to an empty
+	// string (the API returns null, which Go decodes to the zero value).
 	TemplateListItem struct {
 		Active         bool   `json:"Active"`
 		Alias          string `json:"Alias"`
@@ -81,7 +83,8 @@ type (
 	// SendWithTemplateReq is the request body for sending an email using a template.
 	//
 	// Exactly one of TemplateID or TemplateAlias must be set; the API will return
-	// an error if neither is provided.
+	// an error if neither is provided. No enforcement is performed client-side
+	// beyond what the Postmark API itself rejects.
 	//
 	// TrackOpens and InlineCss are *bool so that callers can explicitly send
 	// false (opting out) rather than having the zero value silently omitted.
@@ -119,6 +122,11 @@ type (
 	}
 
 	// ValidateTemplateReq is the request body for validating a template.
+	//
+	// InlineCssForHtmlTestRender is *bool rather than bool so that callers can
+	// explicitly send false (disable CSS inlining for the test render) without
+	// the zero value being silently omitted. A nil pointer omits the field
+	// entirely, letting the server apply its default.
 	ValidateTemplateReq struct {
 		Subject                    string      `json:"Subject,omitempty"`
 		HtmlBody                   string      `json:"HtmlBody,omitempty"`
@@ -126,7 +134,7 @@ type (
 		TestRenderModel            interface{} `json:"TestRenderModel,omitempty"`
 		TemplateType               string      `json:"TemplateType,omitempty"`
 		LayoutTemplate             string      `json:"LayoutTemplate,omitempty"`
-		InlineCssForHtmlTestRender bool        `json:"InlineCssForHtmlTestRender,omitempty"`
+		InlineCssForHtmlTestRender *bool       `json:"InlineCssForHtmlTestRender,omitempty"`
 	}
 
 	// TemplateValidationError represents a single validation error in a template field.
@@ -156,9 +164,9 @@ type (
 	}
 
 	// PushTemplateReq is the request body for pushing templates between servers.
-	// This operation uses the Account API token (set via APITokenOpt or the
-	// POSTMARK_API_TOKEN environment variable), which is sent on all requests
-	// via the X-Postmark-Account-Token header.
+	// This endpoint requires an Account API token. This client sends the account
+	// token on every request via the X-Postmark-Account-Token header (configured
+	// through APITokenOpt or the POSTMARK_API_TOKEN environment variable).
 	PushTemplateReq struct {
 		SourceServerID      int  `json:"SourceServerId"`
 		DestinationServerID int  `json:"DestinationServerId"`
@@ -183,11 +191,11 @@ type (
 // errEmptyTemplateID is returned when a caller passes an empty templateID.
 var errEmptyTemplateID = errors.New("templateID must not be empty")
 
-// boolPtr is a convenience helper that returns a pointer to a bool literal,
-// useful when constructing SendWithTemplateReq inline.
+// BoolPtr is a convenience helper that returns a pointer to a bool literal,
+// useful when constructing requests that have *bool fields inline.
 //
 //	req := &SendWithTemplateReq{TrackOpens: postmark.BoolPtr(false)}
-func boolPtr(b bool) *bool { return &b }
+func BoolPtr(b bool) *bool { return &b }
 
 // SendEmailWithTemplate sends an email using a Postmark template.
 // Requires a server API token. Use TemplateID or TemplateAlias (not both) to
@@ -272,9 +280,13 @@ func (a *API) CreateTemplate(req *CreateTemplateReq) (*TemplateResp, error) {
 // by templateID and returns the updated TemplateResp.
 // templateID may be a numeric ID (passed as its decimal string, e.g. "123")
 // or an alias string (e.g. "welcome-email"); it must not be empty.
+// req must not be nil.
 func (a *API) EditTemplate(templateID string, req *EditTemplateReq) (*TemplateResp, error) {
 	if templateID == "" {
 		return nil, errEmptyTemplateID
+	}
+	if req == nil {
+		return nil, errors.New("EditTemplate: req must not be nil")
 	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("templates/%s", url.PathEscape(templateID)), req)
 	if err != nil {
@@ -294,24 +306,14 @@ func (a *API) EditTemplate(templateID string, req *EditTemplateReq) (*TemplateRe
 
 // ListTemplates returns a paginated list of all Postmark Templates on the server.
 // count controls the page size and offset controls the starting position.
-//
-// Any query parameters already set on the request URL by newRequest are
-// preserved; count and offset are merged in and the combined query string is
-// re-encoded, so no pre-existing parameters are silently dropped.
 func (a *API) ListTemplates(count, offset int) (*ListTemplatesResp, error) {
-	httpReq, err := a.newRequest(http.MethodGet, "templates", nil)
+	params := url.Values{}
+	params.Set("count", strconv.Itoa(count))
+	params.Set("offset", strconv.Itoa(offset))
+	httpReq, err := a.newRequest(http.MethodGet, "templates?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
-
-	// Merge count/offset into any existing query params rather than replacing them.
-	existing, _ := url.ParseQuery(httpReq.URL.RawQuery)
-	if existing == nil {
-		existing = url.Values{}
-	}
-	existing.Set("count", strconv.Itoa(count))
-	existing.Set("offset", strconv.Itoa(offset))
-	httpReq.URL.RawQuery = existing.Encode()
 
 	resp, err := a.Do(httpReq)
 	if err != nil {
@@ -332,9 +334,7 @@ func (a *API) ListTemplates(count, offset int) (*ListTemplatesResp, error) {
 //
 // DeleteResp (defined in servers.go) has ErrorCode and Message fields that
 // match the Postmark Templates delete response shape exactly, so it is safe
-// to reuse here. Non-2xx HTTP responses are surfaced as errors before this
-// function attempts to unmarshal the body, so logical API errors encoded in
-// ErrorCode are handled correctly.
+// to reuse here.
 func (a *API) DeleteTemplate(templateID string) (*DeleteResp, error) {
 	if templateID == "" {
 		return nil, errEmptyTemplateID
@@ -377,9 +377,9 @@ func (a *API) ValidateTemplate(req *ValidateTemplateReq) (*ValidateTemplateResp,
 // PushTemplate pushes templates from a source server to a destination server.
 // Set PerformChanges to true to apply the changes; false performs a dry run.
 //
-// Per Postmark documentation this endpoint requires an Account API token,
-// which this client sends on every request via the X-Postmark-Account-Token
-// header (configured through APITokenOpt or the POSTMARK_API_TOKEN env var).
+// This endpoint requires an Account API token, which this client sends on
+// every request via the X-Postmark-Account-Token header (configured through
+// APITokenOpt or the POSTMARK_API_TOKEN environment variable).
 func (a *API) PushTemplate(req *PushTemplateReq) (*PushTemplateResp, error) {
 	httpReq, err := a.newRequest(http.MethodPut, "templates/push", req)
 	if err != nil {

@@ -505,6 +505,20 @@ func TestEditTemplate_EmptyID(t *testing.T) {
 	}
 }
 
+// TestEditTemplate_NilReq verifies that a nil req is rejected locally before
+// any HTTP request is attempted, preventing a panic inside newRequest.
+func TestEditTemplate_NilReq(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		t.Error("HTTP request should not be made for nil req")
+		return nil, nil
+	})))
+
+	_, err := api.EditTemplate("123", nil)
+	if err == nil {
+		t.Fatal("expected an error for nil req, got nil")
+	}
+}
+
 // ---- ListTemplates -------------------------------------------------------------
 
 func TestListTemplates_Success(t *testing.T) {
@@ -576,10 +590,8 @@ func TestListTemplates_WithOffset(t *testing.T) {
 	}
 }
 
-// TestListTemplates_QueryParamsMerged verifies that ListTemplates merges
-// count/offset into any pre-existing query parameters on the request URL
-// rather than overwriting the entire RawQuery. This guards against a future
-// change in newRequest that might add default query params.
+// TestListTemplates_QueryParamsMerged verifies that ListTemplates includes
+// the expected count and offset query parameters in the request URL.
 func TestListTemplates_QueryParamsMerged(t *testing.T) {
 	var capturedQuery string
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
@@ -763,6 +775,80 @@ func TestValidateTemplate_WithErrors(t *testing.T) {
 	}
 	if got.HtmlBody.ValidationErrors[0].Message != "Unclosed tag" {
 		t.Errorf("ValidationError.Message = %q", got.HtmlBody.ValidationErrors[0].Message)
+	}
+}
+
+// TestValidateTemplateReq_InlineCssForHtmlTestRenderFalse verifies that
+// InlineCssForHtmlTestRender=false is serialised to JSON when explicitly set
+// via a *bool pointer. Using *bool (rather than bare bool with omitempty)
+// means false is a distinct, meaningful value that is not silently dropped.
+func TestValidateTemplateReq_InlineCssForHtmlTestRenderFalse(t *testing.T) {
+	f := false
+	req := &ValidateTemplateReq{
+		Subject:                    "Hello",
+		HtmlBody:                   "<p>Hello</p>",
+		InlineCssForHtmlTestRender: &f,
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err = json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	v, ok := m["InlineCssForHtmlTestRender"]
+	if !ok {
+		t.Fatal("InlineCssForHtmlTestRender key missing from JSON; false should be serialised when *bool pointer is set")
+	}
+	if v.(bool) != false {
+		t.Errorf("InlineCssForHtmlTestRender = %v, want false", v)
+	}
+}
+
+// TestValidateTemplateReq_InlineCssForHtmlTestRenderNilOmitted verifies that
+// a nil InlineCssForHtmlTestRender pointer is omitted from the JSON output
+// so the server applies its default behaviour.
+func TestValidateTemplateReq_InlineCssForHtmlTestRenderNilOmitted(t *testing.T) {
+	req := &ValidateTemplateReq{
+		Subject:                    "Hello",
+		HtmlBody:                   "<p>Hello</p>",
+		InlineCssForHtmlTestRender: nil,
+	}
+
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if bytes.Contains(b, []byte("InlineCssForHtmlTestRender")) {
+		t.Errorf("InlineCssForHtmlTestRender should be absent from JSON when nil, got: %s", b)
+	}
+}
+
+// ---- BoolPtr helper ------------------------------------------------------------
+
+// TestBoolPtr verifies that BoolPtr returns a non-nil pointer to the given bool.
+func TestBoolPtr(t *testing.T) {
+	tr := BoolPtr(true)
+	if tr == nil {
+		t.Fatal("BoolPtr(true) returned nil")
+	}
+	if *tr != true {
+		t.Errorf("*BoolPtr(true) = %v, want true", *tr)
+	}
+
+	fa := BoolPtr(false)
+	if fa == nil {
+		t.Fatal("BoolPtr(false) returned nil")
+	}
+	if *fa != false {
+		t.Errorf("*BoolPtr(false) = %v, want false", *fa)
+	}
+
+	// Verify they are distinct pointers (not the same address).
+	if tr == fa {
+		t.Error("BoolPtr(true) and BoolPtr(false) must not return the same pointer")
 	}
 }
 
