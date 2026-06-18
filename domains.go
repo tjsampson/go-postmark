@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,6 +39,8 @@ type (
 	}
 
 	// CreateDomainReq is the request body for creating a new Postmark Domain.
+	// Name is required (no omitempty) because an empty name is never a valid domain.
+	// ReturnPathDomain is optional; omit it to let Postmark use its default.
 	CreateDomainReq struct {
 		Name             string `json:"Name"`
 		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
@@ -51,7 +54,11 @@ type (
 
 // ListDomains returns a paginated list of all Postmark Domains on the account.
 // count controls the page size and offset controls the starting position.
+// count must be positive.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
+	if count <= 0 {
+		return nil, errors.New("postmark: count must be positive")
+	}
 	params := url.Values{}
 	params.Set("count", strconv.Itoa(count))
 	params.Set("offset", strconv.Itoa(offset))
@@ -89,7 +96,11 @@ func (a *API) CreateDomain(req *CreateDomainReq) (*DomainResp, error) {
 }
 
 // GetDomain fetches the Postmark Domain identified by domainID.
+// domainID must be positive.
 func (a *API) GetDomain(domainID int64) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodGet, fmt.Sprintf("domains/%d", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -107,7 +118,11 @@ func (a *API) GetDomain(domainID int64) (*DomainResp, error) {
 
 // UpdateDomain applies the changes in req to the Postmark Domain identified
 // by domainID and returns the updated DomainResp.
+// domainID must be positive.
 func (a *API) UpdateDomain(domainID int64, req *UpdateDomainReq) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d", domainID), req)
 	if err != nil {
 		return nil, err
@@ -125,7 +140,11 @@ func (a *API) UpdateDomain(domainID int64, req *UpdateDomainReq) (*DomainResp, e
 
 // DeleteDomain deletes the Postmark Domain identified by domainID.
 // It returns a DeleteResp containing the outcome message from the API.
+// domainID must be positive.
 func (a *API) DeleteDomain(domainID int64) (*DeleteResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodDelete, fmt.Sprintf("domains/%d", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -142,7 +161,11 @@ func (a *API) DeleteDomain(domainID int64) (*DeleteResp, error) {
 }
 
 // VerifyDomainDKIM requests DKIM verification for the domain identified by domainID.
+// domainID must be positive.
 func (a *API) VerifyDomainDKIM(domainID int64) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d/verifyDkim", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -159,7 +182,11 @@ func (a *API) VerifyDomainDKIM(domainID int64) (*DomainResp, error) {
 }
 
 // VerifyDomainReturnPath requests Return-Path verification for the domain identified by domainID.
+// domainID must be positive.
 func (a *API) VerifyDomainReturnPath(domainID int64) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d/verifyReturnPath", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -176,7 +203,15 @@ func (a *API) VerifyDomainReturnPath(domainID int64) (*DomainResp, error) {
 }
 
 // VerifyDomainSPF requests SPF verification for the domain identified by domainID.
+// domainID must be positive.
+//
+// Note: the Postmark API specifies POST for this endpoint (POST /domains/{id}/verifyspf),
+// while the other verification helpers use PUT. This is intentional — do not change it
+// to PUT without verifying the upstream API spec first.
 func (a *API) VerifyDomainSPF(domainID int64) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPost, fmt.Sprintf("domains/%d/verifyspf", domainID), nil)
 	if err != nil {
 		return nil, err
@@ -193,7 +228,11 @@ func (a *API) VerifyDomainSPF(domainID int64) (*DomainResp, error) {
 }
 
 // RotateDomainDKIM requests DKIM key rotation for the domain identified by domainID.
+// domainID must be positive.
 func (a *API) RotateDomainDKIM(domainID int64) (*DomainResp, error) {
+	if domainID <= 0 {
+		return nil, errors.New("postmark: domainID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("domains/%d/rotatedkim", domainID), nil)
 	if err != nil {
 		return nil, err

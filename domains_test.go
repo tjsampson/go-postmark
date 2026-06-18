@@ -313,3 +313,85 @@ func TestDomains_UnmarshalError(t *testing.T) {
 		})
 	}
 }
+
+// TestDomains_InputValidation verifies that non-positive IDs and counts are
+// rejected locally before any HTTP request is made.
+func TestDomains_InputValidation(t *testing.T) {
+	// neverCalled panics if the HTTP transport is invoked — confirming that
+	// the guard returned before building a request.
+	neverCalled := newTestClient(func(req *http.Request) (*http.Response, error) {
+		panic("HTTP client must not be called for invalid inputs")
+	})
+
+	api := New(HTTPClientOpt(neverCalled))
+
+	t.Run("ListDomains/zero_count", func(t *testing.T) {
+		_, err := api.ListDomains(0, 0)
+		if err == nil {
+			t.Fatal("expected error for count=0, got nil")
+		}
+	})
+
+	t.Run("ListDomains/negative_count", func(t *testing.T) {
+		_, err := api.ListDomains(-1, 0)
+		if err == nil {
+			t.Fatal("expected error for count=-1, got nil")
+		}
+	})
+
+	t.Run("GetDomain/zero_id", func(t *testing.T) {
+		_, err := api.GetDomain(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("GetDomain/negative_id", func(t *testing.T) {
+		_, err := api.GetDomain(-5)
+		if err == nil {
+			t.Fatal("expected error for domainID=-5, got nil")
+		}
+	})
+
+	t.Run("UpdateDomain/zero_id", func(t *testing.T) {
+		_, err := api.UpdateDomain(0, &UpdateDomainReq{ReturnPathDomain: "pm.x.com"})
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("DeleteDomain/zero_id", func(t *testing.T) {
+		_, err := api.DeleteDomain(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("VerifyDomainDKIM/zero_id", func(t *testing.T) {
+		_, err := api.VerifyDomainDKIM(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("VerifyDomainReturnPath/zero_id", func(t *testing.T) {
+		_, err := api.VerifyDomainReturnPath(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("VerifyDomainSPF/zero_id", func(t *testing.T) {
+		_, err := api.VerifyDomainSPF(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+
+	t.Run("RotateDomainDKIM/zero_id", func(t *testing.T) {
+		_, err := api.RotateDomainDKIM(0)
+		if err == nil {
+			t.Fatal("expected error for domainID=0, got nil")
+		}
+	})
+}

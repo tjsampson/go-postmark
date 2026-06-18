@@ -139,11 +139,10 @@ func (a *API) CreateServer(serverReq *CreateServerReq) (*ServerResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
-
 	var data ServerResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
@@ -157,11 +156,10 @@ func (a *API) ReadServer(serverID string) (*ServerResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
-
 	var data ServerResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
@@ -176,11 +174,10 @@ func (a *API) UpdateServer(serverID string, body *UpdateServerReq) (*ServerResp,
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
-
 	var data ServerResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
@@ -198,11 +195,10 @@ func (a *API) ListServers(count, offset int) (*ListServerResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
-
 	var data ListServerResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
@@ -217,11 +213,10 @@ func (a *API) DeleteServer(serverId string) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
-
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err

@@ -334,3 +334,78 @@ func TestSenderSignatures_UnmarshalError(t *testing.T) {
 		})
 	}
 }
+
+// TestSenderSignatures_InputValidation verifies that non-positive IDs and counts
+// are rejected locally before any HTTP request is made.
+func TestSenderSignatures_InputValidation(t *testing.T) {
+	// neverCalled panics if the HTTP transport is invoked — confirming that
+	// the guard returned before building a request.
+	neverCalled := newTestClient(func(req *http.Request) (*http.Response, error) {
+		panic("HTTP client must not be called for invalid inputs")
+	})
+
+	api := New(HTTPClientOpt(neverCalled))
+
+	t.Run("ListSenderSignatures/zero_count", func(t *testing.T) {
+		_, err := api.ListSenderSignatures(0, 0)
+		if err == nil {
+			t.Fatal("expected error for count=0, got nil")
+		}
+	})
+
+	t.Run("ListSenderSignatures/negative_count", func(t *testing.T) {
+		_, err := api.ListSenderSignatures(-1, 0)
+		if err == nil {
+			t.Fatal("expected error for count=-1, got nil")
+		}
+	})
+
+	t.Run("GetSenderSignature/zero_id", func(t *testing.T) {
+		_, err := api.GetSenderSignature(0)
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+
+	t.Run("GetSenderSignature/negative_id", func(t *testing.T) {
+		_, err := api.GetSenderSignature(-3)
+		if err == nil {
+			t.Fatal("expected error for signatureID=-3, got nil")
+		}
+	})
+
+	t.Run("UpdateSenderSignature/zero_id", func(t *testing.T) {
+		_, err := api.UpdateSenderSignature(0, &UpdateSenderSignatureReq{Name: "X"})
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+
+	t.Run("DeleteSenderSignature/zero_id", func(t *testing.T) {
+		_, err := api.DeleteSenderSignature(0)
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+
+	t.Run("ResendSenderSignatureConfirmation/zero_id", func(t *testing.T) {
+		_, err := api.ResendSenderSignatureConfirmation(0)
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+
+	t.Run("VerifySenderSignatureSPF/zero_id", func(t *testing.T) {
+		_, err := api.VerifySenderSignatureSPF(0)
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+
+	t.Run("RequestNewDKIMForSenderSignature/zero_id", func(t *testing.T) {
+		_, err := api.RequestNewDKIMForSenderSignature(0)
+		if err == nil {
+			t.Fatal("expected error for signatureID=0, got nil")
+		}
+	})
+}

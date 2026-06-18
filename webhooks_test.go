@@ -325,3 +325,43 @@ func TestWebhooks_UnmarshalError(t *testing.T) {
 		})
 	}
 }
+
+// TestWebhooks_InputValidation verifies that non-positive webhook IDs are
+// rejected locally before any HTTP request is made.
+func TestWebhooks_InputValidation(t *testing.T) {
+	// neverCalled panics if the HTTP transport is invoked — confirming that
+	// the guard returned before building a request.
+	neverCalled := newTestClient(func(req *http.Request) (*http.Response, error) {
+		panic("HTTP client must not be called for invalid inputs")
+	})
+
+	api := New(HTTPClientOpt(neverCalled))
+
+	t.Run("GetWebhook/zero_id", func(t *testing.T) {
+		_, err := api.GetWebhook(0)
+		if err == nil {
+			t.Fatal("expected error for webhookID=0, got nil")
+		}
+	})
+
+	t.Run("GetWebhook/negative_id", func(t *testing.T) {
+		_, err := api.GetWebhook(-1)
+		if err == nil {
+			t.Fatal("expected error for webhookID=-1, got nil")
+		}
+	})
+
+	t.Run("UpdateWebhook/zero_id", func(t *testing.T) {
+		_, err := api.UpdateWebhook(0, &UpdateWebhookReq{Url: "https://example.com/hook"})
+		if err == nil {
+			t.Fatal("expected error for webhookID=0, got nil")
+		}
+	})
+
+	t.Run("DeleteWebhook/zero_id", func(t *testing.T) {
+		_, err := api.DeleteWebhook(0)
+		if err == nil {
+			t.Fatal("expected error for webhookID=0, got nil")
+		}
+	})
+}

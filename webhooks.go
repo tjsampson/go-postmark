@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -88,7 +89,7 @@ type (
 	}
 
 	// UpdateWebhookReq is the request body for updating an existing webhook.
-	// It mirrors CreateWebhookReq but is a distinct type so the two can evolve
+	// It is a distinct type from CreateWebhookReq so the two can evolve
 	// independently if the create and update APIs ever diverge.
 	UpdateWebhookReq struct {
 		Url      string           `json:"Url,omitempty"`
@@ -100,6 +101,8 @@ type (
 
 // ListWebhooks returns a list of all webhooks on the account, optionally
 // filtered by messageStream. Pass an empty string to list all webhooks.
+// When messageStream is non-empty it is safely encoded as a query parameter
+// via url.Values so that special characters do not produce a malformed URL.
 func (a *API) ListWebhooks(messageStream string) (*ListWebhooksResp, error) {
 	params := url.Values{}
 	if messageStream != "" {
@@ -143,7 +146,11 @@ func (a *API) CreateWebhook(req *CreateWebhookReq) (*WebhookResp, error) {
 }
 
 // GetWebhook fetches the webhook identified by webhookID.
+// webhookID must be positive.
 func (a *API) GetWebhook(webhookID int64) (*WebhookResp, error) {
+	if webhookID <= 0 {
+		return nil, errors.New("postmark: webhookID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodGet, fmt.Sprintf("webhooks/%d", webhookID), nil)
 	if err != nil {
 		return nil, err
@@ -161,7 +168,11 @@ func (a *API) GetWebhook(webhookID int64) (*WebhookResp, error) {
 
 // UpdateWebhook applies the changes in req to the webhook identified by
 // webhookID and returns the updated WebhookResp.
+// webhookID must be positive.
 func (a *API) UpdateWebhook(webhookID int64, req *UpdateWebhookReq) (*WebhookResp, error) {
+	if webhookID <= 0 {
+		return nil, errors.New("postmark: webhookID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("webhooks/%d", webhookID), req)
 	if err != nil {
 		return nil, err
@@ -179,7 +190,11 @@ func (a *API) UpdateWebhook(webhookID int64, req *UpdateWebhookReq) (*WebhookRes
 
 // DeleteWebhook deletes the webhook identified by webhookID.
 // It returns a DeleteResp containing the outcome message from the API.
+// webhookID must be positive.
 func (a *API) DeleteWebhook(webhookID int64) (*DeleteResp, error) {
+	if webhookID <= 0 {
+		return nil, errors.New("postmark: webhookID must be positive")
+	}
 	httpReq, err := a.newRequest(http.MethodDelete, fmt.Sprintf("webhooks/%d", webhookID), nil)
 	if err != nil {
 		return nil, err
