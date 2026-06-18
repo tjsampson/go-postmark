@@ -16,16 +16,22 @@ type (
 	// SendEmailWithTemplateReq is the request body for sending a single email
 	// using a Postmark template.
 	SendEmailWithTemplateReq struct {
-		TemplateId    int           `json:"TemplateId,omitempty"`
+		// TemplateID is the numeric ID of the template to use.
+		// Either TemplateID or TemplateAlias must be set.
+		TemplateID    int           `json:"TemplateId,omitempty"`
 		TemplateAlias string        `json:"TemplateAlias,omitempty"`
-		TemplateModel TemplateModel `json:"TemplateModel"`
+		// TemplateModel is the data model used to render the template.
+		// omitempty omits a nil map rather than sending "TemplateModel":null.
+		TemplateModel TemplateModel `json:"TemplateModel,omitempty"`
 		From          string        `json:"From"`
 		To            string        `json:"To"`
 		Cc            string        `json:"Cc,omitempty"`
 		Bcc           string        `json:"Bcc,omitempty"`
 		ReplyTo       string        `json:"ReplyTo,omitempty"`
 		Tag           string        `json:"Tag,omitempty"`
-		TrackOpens    bool          `json:"TrackOpens,omitempty"`
+		// TrackOpens uses *bool so that an explicit false is serialised correctly.
+		// omitempty on a plain bool would silently drop false.
+		TrackOpens    *bool         `json:"TrackOpens,omitempty"`
 		TrackLinks    string        `json:"TrackLinks,omitempty"`
 		MessageStream string        `json:"MessageStream,omitempty"`
 		Attachments   []Attachment  `json:"Attachments,omitempty"`
@@ -39,9 +45,17 @@ type (
 		Messages []SendEmailWithTemplateReq `json:"Messages"`
 	}
 
+	// batchWithTemplatesResp is the internal response envelope for the
+	// POST /email/batchWithTemplates endpoint. Postmark returns
+	// {"Messages":[...]} rather than a bare JSON array.
+	batchWithTemplatesResp struct {
+		Messages []EmailResp `json:"Messages"`
+	}
+
 	// TemplateResp represents a Postmark template as returned by the API.
 	TemplateResp struct {
-		TemplateId         int    `json:"TemplateId"`
+		// TemplateID is the numeric ID of the template.
+		TemplateID         int    `json:"TemplateId"`
 		Name               string `json:"Name"`
 		Subject            string `json:"Subject"`
 		HtmlBody           string `json:"HtmlBody"`
@@ -59,6 +73,7 @@ type (
 	}
 
 	// CreateTemplateReq is the request body for creating a new Postmark template.
+	// All fields except Alias and LayoutTemplate are required on create.
 	CreateTemplateReq struct {
 		Name           string `json:"Name"`
 		Subject        string `json:"Subject"`
@@ -69,6 +84,7 @@ type (
 	}
 
 	// UpdateTemplateReq is the request body for updating an existing Postmark template.
+	// All fields are optional; only supplied fields are changed.
 	UpdateTemplateReq struct {
 		Name           string `json:"Name,omitempty"`
 		Subject        string `json:"Subject,omitempty"`
@@ -86,53 +102,59 @@ type (
 )
 
 // SendEmailWithTemplate sends a single email using a Postmark template.
-// Either TemplateId or TemplateAlias must be set in the request.
+// Either TemplateID or TemplateAlias must be set in the request.
 func (a *API) SendEmailWithTemplate(req *SendEmailWithTemplateReq) (*EmailResp, error) {
 	httpReq, err := a.newRequest(http.MethodPost, "email/withTemplate", req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data EmailResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}
+	if data.ErrorCode != 0 {
+		return nil, PostmarkErr{ErrorCode: data.ErrorCode, Message: data.Message}
+	}
 	return &data, nil
 }
 
 // SendEmailBatchWithTemplates sends a batch of emails using Postmark templates.
 // Each message in the batch may reference its own template.
+// The Postmark API returns {"Messages":[...]} which is unwrapped before returning.
 func (a *API) SendEmailBatchWithTemplates(req *BatchWithTemplatesReq) (BatchEmailResp, error) {
 	httpReq, err := a.newRequest(http.MethodPost, "email/batchWithTemplates", req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
-	}
-
-	var data BatchEmailResp
-	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// GetTemplate fetches the Postmark template identified by templateIdOrAlias.
-// The argument may be either a numeric template ID (as a string) or an alias.
-func (a *API) GetTemplate(templateIdOrAlias string) (*TemplateResp, error) {
-	httpReq, err := a.newRequest(http.MethodGet, fmt.Sprintf("templates/%s", templateIdOrAlias), nil)
+	resp, err := a.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+
+	// The API returns {"Messages":[...]} — unmarshal the envelope then return
+	// the inner slice so callers get a flat BatchEmailResp.
+	var envelope batchWithTemplatesResp
+	if err = json.Unmarshal(resp.rawBody, &envelope); err != nil {
+		return nil, err
+	}
+	return BatchEmailResp(envelope.Messages), nil
+}
+
+// GetTemplate fetches the Postmark template identified by templateIDOrAlias.
+// The argument may be either a numeric template ID (as a string) or an alias.
+func (a *API) GetTemplate(templateIDOrAlias string) (*TemplateResp, error) {
+	httpReq, err := a.newRequest(http.MethodGet, fmt.Sprintf("templates/%s", templateIDOrAlias), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data TemplateResp
@@ -149,9 +171,9 @@ func (a *API) CreateTemplate(req *CreateTemplateReq) (*TemplateResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data TemplateResp
@@ -162,15 +184,15 @@ func (a *API) CreateTemplate(req *CreateTemplateReq) (*TemplateResp, error) {
 }
 
 // UpdateTemplate applies the changes in req to the Postmark template identified
-// by templateIdOrAlias and returns the updated TemplateResp.
-func (a *API) UpdateTemplate(templateIdOrAlias string, req *UpdateTemplateReq) (*TemplateResp, error) {
-	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("templates/%s", templateIdOrAlias), req)
+// by templateIDOrAlias and returns the updated TemplateResp.
+func (a *API) UpdateTemplate(templateIDOrAlias string, req *UpdateTemplateReq) (*TemplateResp, error) {
+	httpReq, err := a.newRequest(http.MethodPut, fmt.Sprintf("templates/%s", templateIDOrAlias), req)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data TemplateResp
@@ -190,9 +212,9 @@ func (a *API) ListTemplates(count, offset int) (*ListTemplatesResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListTemplatesResp
@@ -202,16 +224,16 @@ func (a *API) ListTemplates(count, offset int) (*ListTemplatesResp, error) {
 	return &data, nil
 }
 
-// DeleteTemplate deletes the Postmark template identified by templateIdOrAlias.
+// DeleteTemplate deletes the Postmark template identified by templateIDOrAlias.
 // It returns a DeleteTemplateResp containing the outcome message from the API.
-func (a *API) DeleteTemplate(templateIdOrAlias string) (*DeleteTemplateResp, error) {
-	httpReq, err := a.newRequest(http.MethodDelete, fmt.Sprintf("templates/%s", templateIdOrAlias), nil)
+func (a *API) DeleteTemplate(templateIDOrAlias string) (*DeleteTemplateResp, error) {
+	httpReq, err := a.newRequest(http.MethodDelete, fmt.Sprintf("templates/%s", templateIDOrAlias), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(httpReq)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DeleteTemplateResp

@@ -1,6 +1,7 @@
 package postmark
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -31,7 +32,7 @@ func TestSendEmailWithTemplate_Success(t *testing.T) {
 	})))
 
 	got, err := api.SendEmailWithTemplate(&SendEmailWithTemplateReq{
-		TemplateId:    1,
+		TemplateID:    1,
 		TemplateModel: TemplateModel{"name": "Alice"},
 		From:          "sender@example.com",
 		To:            "recipient@example.com",
@@ -58,13 +59,47 @@ func TestSendEmailWithTemplate_APIError(t *testing.T) {
 	})))
 
 	_, err := api.SendEmailWithTemplate(&SendEmailWithTemplateReq{
-		TemplateId:    9999,
+		TemplateID:    9999,
 		TemplateModel: TemplateModel{},
 		From:          "sender@example.com",
 		To:            "recipient@example.com",
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+}
+
+// TestSendEmailWithTemplate_InBodyErrorCode verifies that when Postmark returns
+// HTTP 200 but with a non-zero ErrorCode in the body (e.g. ErrorCode 406 for
+// individual message failures), SendEmailWithTemplate surfaces it as a Go error.
+func TestSendEmailWithTemplate_InBodyErrorCode(t *testing.T) {
+	body := EmailResp{
+		To:        "recipient@example.com",
+		ErrorCode: 406,
+		Message:   "You tried to send to a recipient that has been marked as inactive.",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendEmailWithTemplateReq{
+		TemplateID: 1,
+		From:       "sender@example.com",
+		To:         "inactive@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 406 {
+		t.Errorf("ErrorCode = %d, want 406", pmErr.ErrorCode)
 	}
 }
 
@@ -97,13 +132,55 @@ func TestSendEmailWithTemplate_WithAlias(t *testing.T) {
 	}
 }
 
+// TestSendEmailWithTemplate_TrackOpensFalse verifies that explicitly setting
+// TrackOpens to false is serialised into the JSON body (not silently dropped).
+// This requires TrackOpens to be *bool rather than bool with omitempty.
+func TestSendEmailWithTemplate_TrackOpensFalse(t *testing.T) {
+	trackOpens := false
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		val, ok := body["TrackOpens"]
+		if !ok {
+			t.Error("TrackOpens field missing from JSON body; *bool with omitempty should include false")
+		} else if val != false {
+			t.Errorf("TrackOpens = %v, want false", val)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: jsonBody(t, EmailResp{
+				To:        "recipient@example.com",
+				MessageID: "msg-track-789",
+				ErrorCode: 0,
+				Message:   "OK",
+			}),
+		}, nil
+	})))
+
+	_, err := api.SendEmailWithTemplate(&SendEmailWithTemplateReq{
+		TemplateID:  1,
+		From:        "sender@example.com",
+		To:          "recipient@example.com",
+		TrackOpens:  &trackOpens,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // ---- SendEmailBatchWithTemplates -----------------------------------------------
 
 func TestSendEmailBatchWithTemplates_Success(t *testing.T) {
-	want := BatchEmailResp{
+	// The Postmark batch-with-templates API wraps results in {"Messages":[...]}.
+	// The mock must return this envelope so the unmarshal logic is exercised correctly.
+	wantMessages := []EmailResp{
 		{To: "a@example.com", MessageID: "batch-1", ErrorCode: 0, Message: "OK"},
 		{To: "b@example.com", MessageID: "batch-2", ErrorCode: 0, Message: "OK"},
 	}
+	envelope := batchWithTemplatesResp{Messages: wantMessages}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -114,14 +191,14 @@ func TestSendEmailBatchWithTemplates_Success(t *testing.T) {
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
+			Body:       jsonBody(t, envelope),
 		}, nil
 	})))
 
 	got, err := api.SendEmailBatchWithTemplates(&BatchWithTemplatesReq{
 		Messages: []SendEmailWithTemplateReq{
-			{TemplateId: 1, TemplateModel: TemplateModel{}, From: "sender@example.com", To: "a@example.com"},
-			{TemplateId: 2, TemplateModel: TemplateModel{}, From: "sender@example.com", To: "b@example.com"},
+			{TemplateID: 1, TemplateModel: TemplateModel{}, From: "sender@example.com", To: "a@example.com"},
+			{TemplateID: 2, TemplateModel: TemplateModel{}, From: "sender@example.com", To: "b@example.com"},
 		},
 	})
 	if err != nil {
@@ -135,6 +212,12 @@ func TestSendEmailBatchWithTemplates_Success(t *testing.T) {
 	}
 	if got[1].MessageID != "batch-2" {
 		t.Errorf("got[1].MessageID = %q, want batch-2", got[1].MessageID)
+	}
+	if got[0].To != "a@example.com" {
+		t.Errorf("got[0].To = %q, want a@example.com", got[0].To)
+	}
+	if got[1].To != "b@example.com" {
+		t.Errorf("got[1].To = %q, want b@example.com", got[1].To)
 	}
 }
 
@@ -160,7 +243,7 @@ func TestSendEmailBatchWithTemplates_APIError(t *testing.T) {
 
 func TestGetTemplate_Success(t *testing.T) {
 	want := TemplateResp{
-		TemplateId: 42,
+		TemplateID: 42,
 		Name:       "Welcome Email",
 		Subject:    "Welcome to our service",
 		Active:     true,
@@ -183,8 +266,8 @@ func TestGetTemplate_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.TemplateId != want.TemplateId {
-		t.Errorf("TemplateId = %d, want %d", got.TemplateId, want.TemplateId)
+	if got.TemplateID != want.TemplateID {
+		t.Errorf("TemplateID = %d, want %d", got.TemplateID, want.TemplateID)
 	}
 	if got.Name != want.Name {
 		t.Errorf("Name = %q, want %q", got.Name, want.Name)
@@ -193,7 +276,7 @@ func TestGetTemplate_Success(t *testing.T) {
 
 func TestGetTemplate_ByAlias(t *testing.T) {
 	want := TemplateResp{
-		TemplateId: 10,
+		TemplateID: 10,
 		Name:       "Password Reset",
 		Alias:      "password-reset",
 		Active:     true,
@@ -239,7 +322,7 @@ func TestGetTemplate_NotFound(t *testing.T) {
 
 func TestCreateTemplate_Success(t *testing.T) {
 	want := TemplateResp{
-		TemplateId: 55,
+		TemplateID: 55,
 		Name:       "New Template",
 		Subject:    "Hello {{name}}",
 		Active:     true,
@@ -267,8 +350,8 @@ func TestCreateTemplate_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.TemplateId != want.TemplateId {
-		t.Errorf("TemplateId = %d, want %d", got.TemplateId, want.TemplateId)
+	if got.TemplateID != want.TemplateID {
+		t.Errorf("TemplateID = %d, want %d", got.TemplateID, want.TemplateID)
 	}
 	if got.Name != want.Name {
 		t.Errorf("Name = %q, want %q", got.Name, want.Name)
@@ -298,7 +381,7 @@ func TestCreateTemplate_APIError(t *testing.T) {
 
 func TestUpdateTemplate_Success(t *testing.T) {
 	want := TemplateResp{
-		TemplateId: 7,
+		TemplateID: 7,
 		Name:       "Updated Template",
 		Subject:    "New Subject",
 	}
@@ -367,9 +450,9 @@ func TestListTemplates_Success(t *testing.T) {
 	want := ListTemplatesResp{
 		TotalCount: 3,
 		Templates: []TemplateResp{
-			{TemplateId: 1, Name: "Template A"},
-			{TemplateId: 2, Name: "Template B"},
-			{TemplateId: 3, Name: "Template C"},
+			{TemplateID: 1, Name: "Template A"},
+			{TemplateID: 2, Name: "Template B"},
+			{TemplateID: 3, Name: "Template C"},
 		},
 	}
 
@@ -420,7 +503,7 @@ func TestListTemplates_APIError(t *testing.T) {
 func TestListTemplates_Pagination(t *testing.T) {
 	want := ListTemplatesResp{
 		TotalCount: 100,
-		Templates:  []TemplateResp{{TemplateId: 51, Name: "Template 51"}},
+		Templates:  []TemplateResp{{TemplateID: 51, Name: "Template 51"}},
 	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
