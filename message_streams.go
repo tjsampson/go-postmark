@@ -6,8 +6,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
+)
+
+// MessageStreamType is the set of allowed values for the MessageStreamType field.
+type MessageStreamType string
+
+const (
+	// MessageStreamTypeTransactional is a transactional message stream.
+	MessageStreamTypeTransactional MessageStreamType = "Transactional"
+	// MessageStreamTypeBroadcasts is a broadcast message stream.
+	MessageStreamTypeBroadcasts MessageStreamType = "Broadcasts"
+	// MessageStreamTypeInbound is an inbound message stream.
+	MessageStreamTypeInbound MessageStreamType = "Inbound"
 )
 
 // UnsubscribeHandlingType is the set of allowed values for
@@ -36,7 +47,7 @@ type (
 		ServerID                            int                                  `json:"ServerID"`
 		Name                                string                               `json:"Name"`
 		Description                         string                               `json:"Description"`
-		MessageStreamType                   string                               `json:"MessageStreamType"`
+		MessageStreamType                   MessageStreamType                    `json:"MessageStreamType"`
 		CreatedAt                           time.Time                            `json:"CreatedAt"`
 		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
 		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
@@ -45,10 +56,10 @@ type (
 
 	// CreateMessageStreamReq is the request body for creating a new Message Stream.
 	CreateMessageStreamReq struct {
-		ID                string `json:"ID"`
-		Name              string `json:"Name"`
-		MessageStreamType string `json:"MessageStreamType"`
-		Description       string `json:"Description,omitempty"`
+		ID                string            `json:"ID"`
+		Name              string            `json:"Name"`
+		MessageStreamType MessageStreamType `json:"MessageStreamType"`
+		Description       string            `json:"Description,omitempty"`
 	}
 
 	// EditMessageStreamReq is the request body for editing an existing Message Stream.
@@ -64,32 +75,22 @@ type (
 	}
 
 	// ArchiveMessageStreamResp is the response returned when a message stream is archived.
-	// It is a flat struct that mirrors the fields Postmark returns from the archive endpoint:
-	// all stream fields plus an optional error envelope (ErrorCode, Message).
+	// It embeds MessageStreamResp and adds the ErrorCode and Message fields that
+	// Postmark may include in error scenarios on this endpoint.
 	ArchiveMessageStreamResp struct {
-		ID                                  string                               `json:"ID"`
-		ServerID                            int                                  `json:"ServerID"`
-		Name                                string                               `json:"Name"`
-		Description                         string                               `json:"Description"`
-		MessageStreamType                   string                               `json:"MessageStreamType"`
-		CreatedAt                           time.Time                            `json:"CreatedAt"`
-		ArchivedAt                          *time.Time                           `json:"ArchivedAt"`
-		ExpungeAt                           *time.Time                           `json:"ExpungeAt"`
-		SubscriptionManagementConfiguration *SubscriptionManagementConfiguration `json:"SubscriptionManagementConfiguration"`
-		ErrorCode                           *int                                 `json:"ErrorCode"`
-		Message                             *string                              `json:"Message"`
+		MessageStreamResp
+		ErrorCode *int    `json:"ErrorCode"`
+		Message   *string `json:"Message"`
 	}
 )
 
 // ListMessageStreams returns a list of all Message Streams for the server.
-// Pass includeArchivedStr as "true" to include archived streams in the results;
-// any other value (including "") omits the query parameter and uses the API default (false).
-func (a *API) ListMessageStreams(includeArchivedStr string) (*ListMessageStreamsResp, error) {
+// Pass includeArchived as true to include archived streams in the results;
+// false uses the API default (archived streams excluded).
+func (a *API) ListMessageStreams(includeArchived bool) (*ListMessageStreamsResp, error) {
 	path := "message-streams"
-	if includeArchivedStr == "true" {
-		params := url.Values{}
-		params.Set("includeArchived", strconv.FormatBool(true))
-		path = path + "?" + params.Encode()
+	if includeArchived {
+		path += "?includeArchived=true"
 	}
 
 	req, err := a.newRequest(http.MethodGet, path, nil)
@@ -115,7 +116,7 @@ func (a *API) GetMessageStream(streamID string) (*MessageStreamResp, error) {
 		return nil, errors.New("streamID must not be empty")
 	}
 
-	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", streamID), nil)
+	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("message-streams/%s", url.PathEscape(streamID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +173,11 @@ func (a *API) EditMessageStream(streamID string, req *EditMessageStreamReq) (*Me
 	if streamID == "" {
 		return nil, errors.New("streamID must not be empty")
 	}
+	if req == nil {
+		return nil, errors.New("req must not be nil")
+	}
 
-	httpReq, err := a.newRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", streamID), req)
+	httpReq, err := a.newRequest(http.MethodPatch, fmt.Sprintf("message-streams/%s", url.PathEscape(streamID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +201,7 @@ func (a *API) ArchiveMessageStream(streamID string) (*ArchiveMessageStreamResp, 
 		return nil, errors.New("streamID must not be empty")
 	}
 
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", streamID), nil)
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/archive", url.PathEscape(streamID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +225,7 @@ func (a *API) UnarchiveMessageStream(streamID string) (*MessageStreamResp, error
 		return nil, errors.New("streamID must not be empty")
 	}
 
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", streamID), nil)
+	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/unarchive", url.PathEscape(streamID)), nil)
 	if err != nil {
 		return nil, err
 	}
