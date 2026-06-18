@@ -11,29 +11,29 @@ import (
 type (
 	// SignatureDetails contains the full details of a sender signature.
 	SignatureDetails struct {
-		ID                    int    `json:"ID"`
-		Domain                string `json:"Domain"`
-		EmailAddress          string `json:"EmailAddress"`
-		ReplyToEmailAddress   string `json:"ReplyToEmailAddress"`
-		Name                  string `json:"Name"`
-		Confirmed             bool   `json:"Confirmed"`
-		SPFVerified           bool   `json:"SPFVerified"`
-		SPFHost               string `json:"SPFHost"`
-		SPFTextValue          string `json:"SPFTextValue"`
-		DKIMVerified          bool   `json:"DKIMVerified"`
-		WeakDKIM              bool   `json:"WeakDKIM"`
-		DKIMHost              string `json:"DKIMHost"`
-		DKIMTextValue         string `json:"DKIMTextValue"`
-		DKIMPendingHost       string `json:"DKIMPendingHost"`
-		DKIMPendingTextValue  string `json:"DKIMPendingTextValue"`
-		DKIMRevokedHost       string `json:"DKIMRevokedHost"`
-		DKIMRevokedTextValue  string `json:"DKIMRevokedTextValue"`
-		SafeToRemoveRevokedKey bool  `json:"SafeToRemoveRevokedKey"`
-		DKIMUpdateStatus      string `json:"DKIMUpdateStatus"`
-		ReturnPathDomain      string `json:"ReturnPathDomain"`
-		ReturnPathDomainCNAMEValue  string `json:"ReturnPathDomainCNAMEValue"`
-		ReturnPathDomainVerified    bool   `json:"ReturnPathDomainVerified"`
-		ConfirmationPersonalNote    string `json:"ConfirmationPersonalNote"`
+		ID                         int    `json:"ID"`
+		Domain                     string `json:"Domain"`
+		EmailAddress               string `json:"EmailAddress"`
+		ReplyToEmailAddress        string `json:"ReplyToEmailAddress"`
+		Name                       string `json:"Name"`
+		Confirmed                  bool   `json:"Confirmed"`
+		SPFVerified                bool   `json:"SPFVerified"`
+		SPFHost                    string `json:"SPFHost"`
+		SPFTextValue               string `json:"SPFTextValue"`
+		DKIMVerified               bool   `json:"DKIMVerified"`
+		WeakDKIM                   bool   `json:"WeakDKIM"`
+		DKIMHost                   string `json:"DKIMHost"`
+		DKIMTextValue              string `json:"DKIMTextValue"`
+		DKIMPendingHost            string `json:"DKIMPendingHost"`
+		DKIMPendingTextValue       string `json:"DKIMPendingTextValue"`
+		DKIMRevokedHost            string `json:"DKIMRevokedHost"`
+		DKIMRevokedTextValue       string `json:"DKIMRevokedTextValue"`
+		SafeToRemoveRevokedKey     bool   `json:"SafeToRemoveRevokedKey"`
+		DKIMUpdateStatus           string `json:"DKIMUpdateStatus"`
+		ReturnPathDomain           string `json:"ReturnPathDomain"`
+		ReturnPathDomainCNAMEValue string `json:"ReturnPathDomainCNAMEValue"`
+		ReturnPathDomainVerified   bool   `json:"ReturnPathDomainVerified"`
+		ConfirmationPersonalNote   string `json:"ConfirmationPersonalNote"`
 	}
 
 	// SignatureListEntry is the abbreviated entry returned in list responses.
@@ -47,13 +47,8 @@ type (
 
 	// ListSignaturesResp is the response envelope returned by the list-senders endpoint.
 	ListSignaturesResp struct {
-		TotalCount int                  `json:"TotalCount"`
-		SenderSignatures []SignatureListEntry `json:"SenderSignatures"`
-	}
-
-	// SignatureResp is the full sender signature response.
-	SignatureResp struct {
-		SignatureDetails
+		TotalCount       int                  `json:"TotalCount"`
+		SenderSignatures []SignatureListEntry  `json:"SenderSignatures"`
 	}
 
 	// CreateSignatureReq is the request body for creating a new sender signature.
@@ -72,7 +67,19 @@ type (
 		ReturnPathDomain         string `json:"ReturnPathDomain,omitempty"`
 		ConfirmationPersonalNote string `json:"ConfirmationPersonalNote,omitempty"`
 	}
+
+	// ResendResp is the response returned by the resend-confirmation endpoint.
+	// Postmark returns {"ErrorCode": 0, "Message": "..."} for this call.
+	ResendResp struct {
+		ErrorCode int    `json:"ErrorCode"`
+		Message   string `json:"Message"`
+	}
 )
+
+// SignatureResp is the full sender signature response returned by
+// create/get/edit/rotate operations. It is an alias for SignatureDetails so
+// callers access fields directly without an extra embedding layer.
+type SignatureResp = SignatureDetails
 
 // ListSignatures returns a paginated list of sender signatures on the account.
 // count controls the page size and offset controls the starting position.
@@ -165,7 +172,7 @@ func (a *API) DeleteSignature(sigID int) (*DeleteResp, error) {
 
 // ResendSignatureConfirmation resends the confirmation email for the sender
 // signature identified by sigID.
-func (a *API) ResendSignatureConfirmation(sigID int) (*DeleteResp, error) {
+func (a *API) ResendSignatureConfirmation(sigID int) (*ResendResp, error) {
 	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("senders/%d/resend", sigID), nil)
 	if err != nil {
 		return nil, err
@@ -174,7 +181,7 @@ func (a *API) ResendSignatureConfirmation(sigID int) (*DeleteResp, error) {
 	if e != nil {
 		return nil, e
 	}
-	var data DeleteResp
+	var data ResendResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
 		return nil, err
 	}

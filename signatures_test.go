@@ -65,12 +65,12 @@ func TestListSignatures_APIError(t *testing.T) {
 // ---- GetSignature -------------------------------------------------------------
 
 func TestGetSignature_Success(t *testing.T) {
-	want := SignatureResp{SignatureDetails: SignatureDetails{
+	want := SignatureResp{
 		ID:           42,
 		EmailAddress: "hello@example.com",
 		Name:         "Hello Sender",
 		Confirmed:    true,
-	}}
+	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
@@ -114,11 +114,11 @@ func TestGetSignature_NotFound(t *testing.T) {
 // ---- CreateSignature ----------------------------------------------------------
 
 func TestCreateSignature_Success(t *testing.T) {
-	want := SignatureResp{SignatureDetails: SignatureDetails{
+	want := SignatureResp{
 		ID:           10,
 		EmailAddress: "new@example.com",
 		Name:         "New Sender",
-	}}
+	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -165,10 +165,10 @@ func TestCreateSignature_APIError(t *testing.T) {
 // ---- EditSignature ------------------------------------------------------------
 
 func TestEditSignature_Success(t *testing.T) {
-	want := SignatureResp{SignatureDetails: SignatureDetails{
+	want := SignatureResp{
 		ID:   7,
 		Name: "Updated Sender",
-	}}
+	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
@@ -250,7 +250,7 @@ func TestDeleteSignature_NotFound(t *testing.T) {
 // ---- ResendSignatureConfirmation ----------------------------------------------
 
 func TestResendSignatureConfirmation_Success(t *testing.T) {
-	want := DeleteResp{Message: "Confirmation email has been re-sent."}
+	want := ResendResp{Message: "Confirmation email has been re-sent."}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -274,13 +274,27 @@ func TestResendSignatureConfirmation_Success(t *testing.T) {
 	}
 }
 
+func TestResendSignatureConfirmation_NotFound(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 404, Message: "Sender signature not found"}),
+		}, nil
+	})))
+
+	_, err := api.ResendSignatureConfirmation(9999)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
 // ---- RotateSignatureDKIM -----------------------------------------------------
 
 func TestRotateSignatureDKIM_Success(t *testing.T) {
-	want := SignatureResp{SignatureDetails: SignatureDetails{
+	want := SignatureResp{
 		ID:              9,
 		DKIMPendingHost: "new-dkim._domainkey.example.com",
-	}}
+	}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -301,5 +315,19 @@ func TestRotateSignatureDKIM_Success(t *testing.T) {
 	}
 	if got.DKIMPendingHost != "new-dkim._domainkey.example.com" {
 		t.Errorf("DKIMPendingHost = %q", got.DKIMPendingHost)
+	}
+}
+
+func TestRotateSignatureDKIM_APIError(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+		}, nil
+	})))
+
+	_, err := api.RotateSignatureDKIM(9)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
 	}
 }

@@ -65,7 +65,7 @@ func TestListDomains_APIError(t *testing.T) {
 // ---- GetDomain ----------------------------------------------------------------
 
 func TestGetDomain_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 42, Name: "example.com", DKIMVerified: true}}
+	want := DomainResp{ID: 42, Name: "example.com", DKIMVerified: true}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
@@ -109,7 +109,7 @@ func TestGetDomain_NotFound(t *testing.T) {
 // ---- CreateDomain -------------------------------------------------------------
 
 func TestCreateDomain_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 10, Name: "newdomain.com"}}
+	want := DomainResp{ID: 10, Name: "newdomain.com"}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -153,7 +153,7 @@ func TestCreateDomain_APIError(t *testing.T) {
 // ---- EditDomain ---------------------------------------------------------------
 
 func TestEditDomain_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 7, Name: "example.com", ReturnPathDomain: "pm-bounces.example.com"}}
+	want := DomainResp{ID: 7, Name: "example.com", ReturnPathDomain: "pm-bounces.example.com"}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
@@ -235,7 +235,7 @@ func TestDeleteDomain_NotFound(t *testing.T) {
 // ---- VerifyDomainDKIM ---------------------------------------------------------
 
 func TestVerifyDomainDKIM_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 3, Name: "example.com", DKIMVerified: true}}
+	want := DomainResp{ID: 3, Name: "example.com", DKIMVerified: true}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -259,10 +259,24 @@ func TestVerifyDomainDKIM_Success(t *testing.T) {
 	}
 }
 
+func TestVerifyDomainDKIM_APIError(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+		}, nil
+	})))
+
+	_, err := api.VerifyDomainDKIM(3)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}
+
 // ---- VerifyDomainReturnPath ---------------------------------------------------
 
 func TestVerifyDomainReturnPath_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 4, Name: "example.com", ReturnPathDomainVerified: true}}
+	want := DomainResp{ID: 4, Name: "example.com", ReturnPathDomainVerified: true}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -286,10 +300,24 @@ func TestVerifyDomainReturnPath_Success(t *testing.T) {
 	}
 }
 
+func TestVerifyDomainReturnPath_APIError(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+		}, nil
+	})))
+
+	_, err := api.VerifyDomainReturnPath(4)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}
+
 // ---- RotateDomainDKIM ---------------------------------------------------------
 
 func TestRotateDomainDKIM_Success(t *testing.T) {
-	want := DomainResp{DomainDetails: DomainDetails{ID: 6, Name: "example.com", DKIMPendingHost: "new-dkim._domainkey.example.com"}}
+	want := DomainResp{ID: 6, Name: "example.com", DKIMPendingHost: "new-dkim._domainkey.example.com"}
 
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
@@ -310,5 +338,19 @@ func TestRotateDomainDKIM_Success(t *testing.T) {
 	}
 	if got.DKIMPendingHost != "new-dkim._domainkey.example.com" {
 		t.Errorf("DKIMPendingHost = %q", got.DKIMPendingHost)
+	}
+}
+
+func TestRotateDomainDKIM_APIError(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+		}, nil
+	})))
+
+	_, err := api.RotateDomainDKIM(6)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
 	}
 }

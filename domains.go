@@ -9,42 +9,35 @@ import (
 )
 
 type (
-	// DKIMPendingHost holds the pending DKIM host/value pair during key rotation.
-	DKIMPendingHost struct {
-		Host  string `json:"Host"`
-		Type  string `json:"Type"`
-		Value string `json:"Value"`
-	}
-
 	// DomainDetails contains the full DNS and configuration details of a domain.
 	DomainDetails struct {
-		ID                    int             `json:"ID"`
-		Name                  string          `json:"Name"`
-		SPFVerified           bool            `json:"SPFVerified"`
-		SPFHost               string          `json:"SPFHost"`
-		SPFTextValue          string          `json:"SPFTextValue"`
-		DKIMVerified          bool            `json:"DKIMVerified"`
-		WeakDKIM              bool            `json:"WeakDKIM"`
-		DKIMHost              string          `json:"DKIMHost"`
-		DKIMTextValue         string          `json:"DKIMTextValue"`
-		DKIMPendingHost       string          `json:"DKIMPendingHost"`
-		DKIMPendingTextValue  string          `json:"DKIMPendingTextValue"`
-		DKIMRevokedHost       string          `json:"DKIMRevokedHost"`
-		DKIMRevokedTextValue  string          `json:"DKIMRevokedTextValue"`
-		SafeToRemoveRevokedKey bool           `json:"SafeToRemoveRevokedKey"`
-		DKIMUpdateStatus      string          `json:"DKIMUpdateStatus"`
-		ReturnPathDomain      string          `json:"ReturnPathDomain"`
-		ReturnPathDomainCNAMEValue string     `json:"ReturnPathDomainCNAMEValue"`
-		ReturnPathDomainVerified bool         `json:"ReturnPathDomainVerified"`
+		ID                         int    `json:"ID"`
+		Name                       string `json:"Name"`
+		SPFVerified                bool   `json:"SPFVerified"`
+		SPFHost                    string `json:"SPFHost"`
+		SPFTextValue               string `json:"SPFTextValue"`
+		DKIMVerified               bool   `json:"DKIMVerified"`
+		WeakDKIM                   bool   `json:"WeakDKIM"`
+		DKIMHost                   string `json:"DKIMHost"`
+		DKIMTextValue              string `json:"DKIMTextValue"`
+		DKIMPendingHost            string `json:"DKIMPendingHost"`
+		DKIMPendingTextValue       string `json:"DKIMPendingTextValue"`
+		DKIMRevokedHost            string `json:"DKIMRevokedHost"`
+		DKIMRevokedTextValue       string `json:"DKIMRevokedTextValue"`
+		SafeToRemoveRevokedKey     bool   `json:"SafeToRemoveRevokedKey"`
+		DKIMUpdateStatus           string `json:"DKIMUpdateStatus"`
+		ReturnPathDomain           string `json:"ReturnPathDomain"`
+		ReturnPathDomainCNAMEValue string `json:"ReturnPathDomainCNAMEValue"`
+		ReturnPathDomainVerified   bool   `json:"ReturnPathDomainVerified"`
 	}
 
 	// DomainListEntry is the abbreviated domain entry returned in list responses.
 	DomainListEntry struct {
-		ID           int    `json:"ID"`
-		Name         string `json:"Name"`
-		SPFVerified  bool   `json:"SPFVerified"`
-		DKIMVerified bool   `json:"DKIMVerified"`
-		ReturnPathDomainVerified bool `json:"ReturnPathDomainVerified"`
+		ID                       int    `json:"ID"`
+		Name                     string `json:"Name"`
+		SPFVerified              bool   `json:"SPFVerified"`
+		DKIMVerified             bool   `json:"DKIMVerified"`
+		ReturnPathDomainVerified bool   `json:"ReturnPathDomainVerified"`
 	}
 
 	// ListDomainsResp is the response envelope returned by the list-domains endpoint.
@@ -53,15 +46,10 @@ type (
 		Domains    []DomainListEntry `json:"Domains"`
 	}
 
-	// DomainResp is the full domain response returned by create/get/edit/verify operations.
-	DomainResp struct {
-		DomainDetails
-	}
-
 	// CreateDomainReq is the request body for creating a new domain.
 	CreateDomainReq struct {
-		Name              string `json:"Name"`
-		ReturnPathDomain  string `json:"ReturnPathDomain,omitempty"`
+		Name             string `json:"Name"`
+		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
 	}
 
 	// EditDomainReq is the request body for editing an existing domain.
@@ -69,6 +57,11 @@ type (
 		ReturnPathDomain string `json:"ReturnPathDomain,omitempty"`
 	}
 )
+
+// DomainResp is the full domain response returned by create/get/edit/verify
+// operations. It is an alias for DomainDetails so callers access fields
+// directly without an extra embedding layer.
+type DomainResp = DomainDetails
 
 // ListDomains returns a paginated list of domains on the account.
 // count controls the page size and offset controls the starting position.
