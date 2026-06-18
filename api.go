@@ -23,11 +23,12 @@ type (
 	// API is the main client for the Postmark API.
 	// Create one with New() and supply functional options to configure it.
 	API struct {
-		client     Doer
-		timeout    time.Duration
-		baseHost   string
-		token      string
-		timeoutSet bool // true when TimeoutOpt was explicitly supplied
+		client      Doer
+		timeout     time.Duration
+		baseHost    string
+		token       string
+		serverToken string
+		timeoutSet  bool // true when TimeoutOpt was explicitly supplied
 	}
 
 	// Req holds the URI and optional JSON body string for an outgoing request.
@@ -84,7 +85,32 @@ func New(options ...Option) *API {
 // If body is non-nil it is JSON-encoded as the request body and Content-Type
 // is set to application/json. If body is nil, http.NoBody is used and no
 // Content-Type header is set.
+// The request is authenticated with the account token (X-Postmark-Account-Token).
 func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
+	req, err := a.buildRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Postmark-Account-Token", a.token)
+	return req, nil
+}
+
+// newServerRequest builds an *http.Request authenticated with the server token
+// (X-Postmark-Server-Token). It is used for email-sending endpoints which
+// require a server-scoped token rather than an account-scoped token.
+func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	req, err := a.buildRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Postmark-Server-Token", a.serverToken)
+	return req, nil
+}
+
+// buildRequest constructs an *http.Request with common headers (Accept,
+// Content-Type) but without any authentication header.  Authentication headers
+// are applied by the callers (newRequest / newServerRequest).
+func (a *API) buildRequest(method, path string, body interface{}) (*http.Request, error) {
 	var reqBody io.Reader = http.NoBody
 	hasBody := body != nil
 	if hasBody {
@@ -107,8 +133,6 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Postmark-Account-Token", a.token)
-
 	return req, nil
 }
 
