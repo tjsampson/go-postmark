@@ -25,10 +25,11 @@ type (
 	// API is the main client for the Postmark API.
 	// Create one with New() and supply functional options to configure it.
 	API struct {
-		client   Doer
-		timeout  time.Duration
-		baseHost string
-		token    string
+		client     Doer
+		timeout    time.Duration
+		baseHost   string
+		token      string
+		timeoutSet bool // true when TimeoutOpt was explicitly supplied
 	}
 
 	// Req holds the URI and optional JSON body string for an outgoing request.
@@ -65,6 +66,17 @@ func New(options ...Option) *API {
 	// Apply Dynamic Caller Opts
 	for _, opt := range options {
 		opt(api)
+	}
+
+	// Reconcile: if the caller explicitly supplied TimeoutOpt and the underlying
+	// client is an *http.Client, propagate the final timeout to it. This ensures
+	// the timeout is consistent regardless of option order, without silently
+	// overwriting a timeout set on a caller-owned client that was injected without
+	// a corresponding TimeoutOpt.
+	if api.timeoutSet {
+		if hc, ok := api.client.(*http.Client); ok {
+			hc.Timeout = api.timeout
+		}
 	}
 
 	return api
