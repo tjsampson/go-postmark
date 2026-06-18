@@ -48,15 +48,22 @@ type (
 	}
 
 	// GetBouncesParams holds the optional query parameters for GET /bounces.
-	// Count and Offset use -1 as a sentinel meaning "omit from the query string
-	// and let the Postmark API apply its default". A value of 0 for either field
-	// is therefore treated as unset, not as an explicit zero. Callers who need to
-	// send offset=0 explicitly should leave Offset at its zero value and rely on
-	// the API default, or set Count without Offset.
+	//
+	// Offset sentinel: set Offset to -1 to omit the offset parameter from the
+	// query string entirely, leaving the Postmark API default (0) in effect.
+	// The zero value (Offset == 0) is treated as an explicit "start at the
+	// beginning" and will be sent as offset=0. This is consistent with
+	// Count, which uses > 0 to decide whether to send the parameter (0 is
+	// not a valid page size, so zero means "omit").
 	GetBouncesParams struct {
-		// Count is the number of bounces to return per page. Use -1 to omit.
+		// Count is the number of bounces to return per page.
+		// A value of 0 (the zero value) omits the parameter from the query
+		// string; any value > 0 is sent as-is.
 		Count int
-		// Offset is the zero-based starting index for pagination. Use -1 to omit.
+		// Offset is the zero-based starting index for pagination.
+		// The zero value (0) is sent as offset=0, explicitly requesting the
+		// first page. Set to -1 to omit the parameter entirely and rely on
+		// the Postmark API default (which is also 0).
 		Offset          int
 		Type            string
 		Inactive        *bool
@@ -90,6 +97,12 @@ type (
 // X-Postmark-Server-Token header required by server-level endpoints.
 // It replaces the X-Postmark-Account-Token set by newRequest with the
 // correct server-level token header.
+//
+// Note: the API struct holds a single token field (a.token) that is
+// populated by APITokenOpt. For server-level endpoints this same value is
+// used as the server token. If a future revision of this package needs to
+// distinguish separate account-level and server-level credentials, a
+// dedicated serverToken field should be added to the API struct.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
 	req, err := a.newRequest(method, path, body)
 	if err != nil {
@@ -124,10 +137,14 @@ func (a *API) GetDeliveryStats() (*DeliveryStatsResp, error) {
 // GetBounces returns a paginated list of bounces filtered by the supplied
 // params. It calls GET /bounces with the query parameters derived from params.
 //
-// For Count and Offset, set the field to -1 to omit it from the query string
-// entirely (leaving the Postmark API default in effect). The zero value (0)
-// is also treated as "omit" for both fields: 0 is not a valid Count, and
-// Postmark's default offset is 0 so an explicit offset=0 is redundant.
+// Pass nil for params to omit all query parameters and use the Postmark API
+// defaults.
+//
+// For Count: a value of 0 (the zero value) omits the parameter; any value > 0
+// is sent as the page size.
+//
+// For Offset: the zero value (0) is sent as offset=0, explicitly requesting
+// the first page. Set Offset to -1 to omit the parameter entirely.
 func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 	q := url.Values{}
 	if params != nil {
@@ -135,8 +152,8 @@ func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 			q.Set("count", strconv.Itoa(params.Count))
 		}
 		// Offset uses -1 as the "omit" sentinel. Any value >= 0 is sent
-		// as-is so callers can explicitly request offset=0 when resetting
-		// pagination after a previous non-zero offset.
+		// as-is so callers can explicitly request offset=0 when starting
+		// at the first page or resetting pagination.
 		if params.Offset >= 0 {
 			q.Set("offset", strconv.Itoa(params.Offset))
 		}
@@ -166,15 +183,18 @@ func (a *API) GetBounces(params *GetBouncesParams) (*GetBouncesResp, error) {
 		}
 	}
 
-	path := "bounces"
-	if len(q) > 0 {
-		path = "bounces?" + q.Encode()
-	}
-
-	req, err := a.newServerRequest(http.MethodGet, path, nil)
+	req, err := a.newServerRequest(http.MethodGet, "bounces", nil)
 	if err != nil {
 		return nil, err
 	}
+	// Set the query string on the already-parsed URL so that the path
+	// segment ("bounces") and the query string remain cleanly separated,
+	// rather than embedding a literal '?' in the path string passed to
+	// newRequest.
+	if len(q) > 0 {
+		req.URL.RawQuery = q.Encode()
+	}
+
 	resp, err := a.Do(req)
 	if err != nil {
 		return nil, err

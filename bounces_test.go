@@ -56,6 +56,9 @@ func TestGetDeliveryStats_Success(t *testing.T) {
 	}
 }
 
+// TestGetDeliveryStats_APIError verifies that a non-2xx response causes
+// GetDeliveryStats to return a non-nil error that wraps a PostmarkErr value
+// with the expected ErrorCode.
 func TestGetDeliveryStats_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -69,6 +72,11 @@ func TestGetDeliveryStats_APIError(t *testing.T) {
 	_, err := api.GetDeliveryStats()
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	// The error must be (or wrap) a PostmarkErr — not merely any error.
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be PostmarkErr, got %T: %v", err, err)
 	}
 }
 
@@ -105,6 +113,25 @@ func TestGetBounces_Success(t *testing.T) {
 	}
 	if len(got.Bounces) != 2 {
 		t.Errorf("len(Bounces) = %d, want 2", len(got.Bounces))
+	}
+}
+
+// TestGetBounces_NilParams_NoQueryString verifies that passing nil params to
+// GetBounces results in a request with no query string at all.
+func TestGetBounces_NilParams_NoQueryString(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if req.URL.RawQuery != "" {
+			t.Errorf("expected empty query string for nil params, got %q", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, GetBouncesResp{}),
+		}, nil
+	})))
+
+	_, err := api.GetBounces(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -147,6 +174,10 @@ func TestGetBounces_WithParams(t *testing.T) {
 		if !strings.Contains(q, "messageStreamID=outbound") {
 			t.Errorf("expected messageStreamID=outbound in query, got %s", q)
 		}
+		// Also verify the path is clean (no '?' embedded in it).
+		if strings.Contains(req.URL.Path, "?") {
+			t.Errorf("query string must not be embedded in URL path, got path=%q", req.URL.Path)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
@@ -186,6 +217,10 @@ func TestGetBounces_OffsetZero(t *testing.T) {
 		q := req.URL.RawQuery
 		if !strings.Contains(q, "offset=0") {
 			t.Errorf("expected offset=0 in query when Offset=0, got %q", q)
+		}
+		// Verify query is in RawQuery, not embedded in the path.
+		if strings.Contains(req.URL.Path, "?") {
+			t.Errorf("query string must not be embedded in URL path, got path=%q", req.URL.Path)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -251,6 +286,8 @@ func TestGetBounces_InactiveFalse(t *testing.T) {
 	}
 }
 
+// TestGetBounces_APIError verifies that a non-2xx response causes GetBounces
+// to return a non-nil PostmarkErr.
 func TestGetBounces_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
 
@@ -264,6 +301,10 @@ func TestGetBounces_APIError(t *testing.T) {
 	_, err := api.GetBounces(nil)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Errorf("expected error to be PostmarkErr, got %T: %v", err, err)
 	}
 }
 
