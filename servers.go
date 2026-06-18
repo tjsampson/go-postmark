@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 type (
@@ -182,8 +184,11 @@ func (a *API) UpdateServer(serverID string, body *UpdateServerReq) (*ServerResp,
 
 // ListServers returns a paginated list of all Postmark Servers on the account.
 // count controls the page size and offset controls the starting position.
-func (a *API) ListServers(count, offset string) (*ListServerResp, error) {
-	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("servers?count=%s&offset=%s", count, offset), nil)
+func (a *API) ListServers(count, offset int) (*ListServerResp, error) {
+	params := url.Values{}
+	params.Set("count", strconv.Itoa(count))
+	params.Set("offset", strconv.Itoa(offset))
+	req, err := a.newRequest(http.MethodGet, "servers?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
