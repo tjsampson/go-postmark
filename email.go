@@ -66,9 +66,15 @@ type (
 	// SendEmailResp is the response returned by the /email, /email/batch,
 	// /email/withTemplate, and /email/batchWithTemplates endpoints.
 	//
-	// Callers should always check ErrorCode after a successful HTTP call: Postmark
-	// returns HTTP 200 even when an individual message fails, signalling the
-	// per-message outcome via ErrorCode (0 = success) and Message.
+	// For single-send endpoints (SendEmail, SendWithTemplate) the library
+	// automatically converts a non-zero ErrorCode into a Go error, so callers
+	// do not need to inspect this field themselves.
+	//
+	// For batch endpoints (SendBatch, SendBatchWithTemplates) Postmark returns
+	// HTTP 200 with a per-item ErrorCode for each message that failed. The
+	// library does NOT aggregate these into a Go error because partial success
+	// is a valid and common outcome. Callers MUST inspect ErrorCode on every
+	// element of the returned slice (0 = success, non-zero = failure).
 	SendEmailResp struct {
 		// To is the recipient address.
 		To string `json:"To"`
@@ -77,7 +83,9 @@ type (
 		// MessageID is the unique Postmark message ID.
 		MessageID string `json:"MessageID"`
 		// ErrorCode is the Postmark error code (0 = success).
-		// A non-zero value indicates a per-message failure even within an HTTP 200 response.
+		// A non-zero value indicates a per-message failure even within an HTTP 200
+		// response. For batch endpoints callers must check this field on every
+		// element; for single-send endpoints the library surfaces it as a Go error.
 		ErrorCode int `json:"ErrorCode"`
 		// Message describes the outcome (e.g. "OK").
 		Message string `json:"Message"`
@@ -107,13 +115,13 @@ type (
 		// TrackLinks controls click tracking. Valid values: "None", "HtmlAndText",
 		// "HtmlOnly", "TextOnly".
 		TrackLinks string `json:"TrackLinks,omitempty"`
-		// TemplateId is the numeric ID of the template to use.
-		// Either TemplateId or TemplateAlias must be set. Because 0 is not a valid
+		// TemplateID is the numeric ID of the template to use.
+		// Either TemplateID or TemplateAlias must be set. Because 0 is not a valid
 		// Postmark template ID, omitempty is safe here and avoids sending a
 		// spurious zero when only TemplateAlias is provided.
-		TemplateId int64 `json:"TemplateId,omitempty"`
+		TemplateID int64 `json:"TemplateId,omitempty"`
 		// TemplateAlias is the string alias of the template to use.
-		// Either TemplateId or TemplateAlias must be set.
+		// Either TemplateID or TemplateAlias must be set.
 		TemplateAlias string `json:"TemplateAlias,omitempty"`
 		// TemplateModel is the data model passed to the template for rendering.
 		TemplateModel map[string]interface{} `json:"TemplateModel,omitempty"`
@@ -155,6 +163,12 @@ type (
 
 	// BulkJobResp is the response returned by the POST /email/bulk and
 	// GET /email/bulk/{bulk-request-id} endpoints.
+	//
+	// Unlike the single-send and batch endpoints, the Postmark bulk API does not
+	// embed per-message ErrorCode/Message fields directly in this response.
+	// Overall job health is indicated by the Status, SuccessCount, and ErrorCount
+	// fields. HTTP-level errors from the API (non-2xx) are surfaced as Go errors
+	// by the underlying Do() call.
 	BulkJobResp struct {
 		// ID is the unique identifier for the bulk job.
 		ID string `json:"ID"`
@@ -183,6 +197,11 @@ type (
 // returns a PostmarkErr so callers receive a Go error rather than silently
 // getting a response with a failed outcome embedded inside an HTTP 200.
 // Postmark uses ErrorCode/Message for per-message failures even in 200 responses.
+//
+// This helper is intentionally NOT called for batch methods (SendBatch,
+// SendBatchWithTemplates) because partial success — some messages delivered,
+// others failed — is a valid and common outcome for those endpoints. Callers
+// of batch methods must inspect each SendEmailResp.ErrorCode individually.
 func checkEmailRespError(r *SendEmailResp) error {
 	if r.ErrorCode != 0 {
 		return PostmarkErr{ErrorCode: r.ErrorCode, Message: r.Message}
@@ -191,7 +210,8 @@ func checkEmailRespError(r *SendEmailResp) error {
 }
 
 // SendEmail sends a single email message via POST /email.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
 // An error is returned for both transport failures and for Postmark
 // per-message errors (non-zero ErrorCode in the response body), so callers
@@ -216,14 +236,17 @@ func (a *API) SendEmail(emailReq *SendEmailReq) (*SendEmailResp, error) {
 }
 
 // SendBatch sends a batch of email messages via POST /email/batch.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
 // The Postmark /email/batch endpoint expects a bare JSON array as the request
 // body (https://postmarkapp.com/developer/api/email-api#send-batch-emails).
 //
-// An error is returned for transport or HTTP-level failures. Per-message
-// outcomes within a successful batch response are represented in each
-// SendEmailResp.ErrorCode field; callers should inspect those individually.
+// An error is returned for transport or HTTP-level failures (non-2xx status).
+// Postmark returns HTTP 200 even when individual messages fail: per-message
+// outcomes are represented in each SendEmailResp.ErrorCode (0 = success).
+// Partial success — some messages delivered, others not — is a normal outcome.
+// Callers MUST inspect ErrorCode on every element of the returned slice.
 func (a *API) SendBatch(reqs []SendEmailReq) ([]SendEmailResp, error) {
 	// /email/batch expects a bare JSON array, not a wrapped object.
 	req, err := a.newServerRequest(http.MethodPost, "email/batch", reqs)
@@ -243,7 +266,8 @@ func (a *API) SendBatch(reqs []SendEmailReq) ([]SendEmailResp, error) {
 
 // SendWithTemplate sends an email using a Postmark template via
 // POST /email/withTemplate.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
 // An error is returned for both transport failures and for Postmark
 // per-message errors (non-zero ErrorCode in the response body).
@@ -268,14 +292,19 @@ func (a *API) SendWithTemplate(tmplReq *SendTemplateReq) (*SendEmailResp, error)
 
 // SendBatchWithTemplates sends a batch of templated emails via
 // POST /email/batchWithTemplates.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
-// The Postmark /email/batchWithTemplates endpoint expects a JSON object with a
+// The Postmark /email/batchWithTemplates endpoint requires a JSON object with a
 // top-level "Messages" key wrapping the array
-// (https://postmarkapp.com/developer/api/email-api#send-batch-with-templates).
+// (https://postmarkapp.com/developer/api/email-api#send-batch-with-templates);
+// this wrapper is applied automatically.
 //
-// An error is returned for transport or HTTP-level failures. Per-message
-// outcomes are represented in each SendEmailResp.ErrorCode field.
+// An error is returned for transport or HTTP-level failures (non-2xx status).
+// Postmark returns HTTP 200 even when individual messages fail: per-message
+// outcomes are represented in each SendEmailResp.ErrorCode (0 = success).
+// Partial success — some messages delivered, others not — is a normal outcome.
+// Callers MUST inspect ErrorCode on every element of the returned slice.
 func (a *API) SendBatchWithTemplates(reqs []SendTemplateReq) ([]SendEmailResp, error) {
 	payload := batchTemplateReqWrapper{Messages: reqs}
 	req, err := a.newServerRequest(http.MethodPost, "email/batchWithTemplates", payload)
@@ -294,10 +323,16 @@ func (a *API) SendBatchWithTemplates(reqs []SendTemplateReq) ([]SendEmailResp, e
 }
 
 // CreateBulkJob creates a bulk email job via POST /email/bulk.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
 // The Postmark /email/bulk endpoint expects a bare JSON array as the request
 // body (https://postmarkapp.com/developer/api/email-api#send-bulk-email).
+//
+// Unlike the single-send and batch endpoints, BulkJobResp does not contain
+// per-message ErrorCode fields. HTTP-level errors are returned as Go errors;
+// per-message outcomes within a completed job are available via GetBulkJob
+// (reflected in SuccessCount and ErrorCount).
 func (a *API) CreateBulkJob(reqs []SendEmailReq) (*BulkJobResp, error) {
 	// /email/bulk expects a bare JSON array, not a wrapped object.
 	req, err := a.newServerRequest(http.MethodPost, "email/bulk", reqs)
@@ -317,7 +352,8 @@ func (a *API) CreateBulkJob(reqs []SendEmailReq) (*BulkJobResp, error) {
 
 // GetBulkJob retrieves the status of a bulk email job via
 // GET /email/bulk/{bulk-request-id}.
-// Authentication uses the X-Postmark-Server-Token header.
+// Authentication uses the X-Postmark-Server-Token header; configure the token
+// with ServerTokenOpt when calling New().
 //
 // id is URL-path-escaped before use so that callers may pass arbitrary job IDs
 // without risk of path injection.

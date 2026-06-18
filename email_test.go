@@ -374,6 +374,53 @@ func TestSendBatch_BareJSONArray(t *testing.T) {
 	}
 }
 
+// TestSendBatch_PerItemErrorCode verifies the documented contract for batch
+// endpoints: Postmark returns HTTP 200 even when individual messages fail.
+// The library does NOT aggregate per-item errors into a Go error because partial
+// success is a valid outcome. Callers must inspect ErrorCode on each element.
+func TestSendBatch_PerItemErrorCode(t *testing.T) {
+	// Simulate a batch where the first message succeeds and the second fails.
+	batchResp := []SendEmailResp{
+		{To: "ok@example.com", MessageID: "msg-ok", ErrorCode: 0, Message: "OK"},
+		{To: "bad@example.com", ErrorCode: 406, Message: "Inactive recipient"},
+	}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, batchResp),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendBatch([]SendEmailReq{
+		{From: "a@a.com", To: "ok@example.com"},
+		{From: "a@a.com", To: "bad@example.com"},
+	})
+
+	// SendBatch must NOT return a Go error for per-item failures — the HTTP
+	// response is 200 and partial success is expected.
+	if err != nil {
+		t.Fatalf("SendBatch() should not return a Go error for per-item failures, got: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(got))
+	}
+	// The successful element must have ErrorCode 0.
+	if got[0].ErrorCode != 0 {
+		t.Errorf("got[0].ErrorCode = %d, want 0", got[0].ErrorCode)
+	}
+	// The failed element must expose ErrorCode 406 so the caller can act on it.
+	if got[1].ErrorCode != 406 {
+		t.Errorf("got[1].ErrorCode = %d, want 406", got[1].ErrorCode)
+	}
+	if got[1].Message != "Inactive recipient" {
+		t.Errorf("got[1].Message = %q, want %q", got[1].Message, "Inactive recipient")
+	}
+}
+
 func TestSendBatch_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
 
@@ -406,7 +453,7 @@ func TestSendWithTemplate_Success(t *testing.T) {
 			req: &SendTemplateReq{
 				From:       "sender@example.com",
 				To:         "recipient@example.com",
-				TemplateId: 12345,
+				TemplateID: 12345,
 				TemplateModel: map[string]interface{}{
 					"name":    "Alice",
 					"product": "Postmark",
@@ -558,6 +605,39 @@ func TestSendWithTemplate_InlineCssFalse(t *testing.T) {
 	})
 }
 
+// TestSendWithTemplate_TemplateIDSerialised verifies that TemplateID (renamed
+// from TemplateId for idiomatic Go) is still marshalled as "TemplateId" in the
+// JSON body, matching what the Postmark API expects.
+func TestSendWithTemplate_TemplateIDSerialised(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			val, ok := raw["TemplateId"]
+			if !ok {
+				t.Error("expected 'TemplateId' key in JSON body (Postmark API requires this casing)")
+			} else {
+				var id int64
+				if err := json.Unmarshal(val, &id); err != nil || id != 99 {
+					t.Errorf("TemplateId in JSON = %s, want 99", val)
+				}
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.SendWithTemplate(&SendTemplateReq{
+		From:       "a@a.com",
+		To:         "b@b.com",
+		TemplateID: 99,
+	})
+}
+
 // TestSendWithTemplate_ErrorCodeSurfaced verifies that a non-zero ErrorCode in
 // an HTTP-200 response is surfaced as a Go error.
 func TestSendWithTemplate_ErrorCodeSurfaced(t *testing.T) {
@@ -597,7 +677,7 @@ func TestSendWithTemplate_APIError(t *testing.T) {
 		})),
 	)
 
-	_, err := api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateId: 9999})
+	_, err := api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateID: 9999})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -614,7 +694,7 @@ func TestSendBatchWithTemplates_Success(t *testing.T) {
 		{
 			name: "single templated message",
 			reqs: []SendTemplateReq{
-				{From: "a@a.com", To: "b@b.com", TemplateId: 1},
+				{From: "a@a.com", To: "b@b.com", TemplateID: 1},
 			},
 			resps: []SendEmailResp{
 				{To: "b@b.com", MessageID: "btmpl-001", ErrorCode: 0, Message: "OK"},
@@ -700,10 +780,50 @@ func TestSendBatchWithTemplates_WrapsMessages(t *testing.T) {
 		})),
 	)
 	_, err := api.SendBatchWithTemplates([]SendTemplateReq{
-		{From: "a@a.com", To: "b@b.com", TemplateId: 1},
+		{From: "a@a.com", To: "b@b.com", TemplateID: 1},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendBatchWithTemplates_PerItemErrorCode verifies the documented contract
+// for batch endpoints: Postmark returns HTTP 200 even when individual messages
+// fail. The library does NOT aggregate per-item errors into a Go error; callers
+// must inspect ErrorCode on each element.
+func TestSendBatchWithTemplates_PerItemErrorCode(t *testing.T) {
+	batchResp := []SendEmailResp{
+		{To: "ok@example.com", MessageID: "msg-ok", ErrorCode: 0, Message: "OK"},
+		{To: "bad@example.com", ErrorCode: 1101, Message: "Template not found"},
+	}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, batchResp),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendBatchWithTemplates([]SendTemplateReq{
+		{From: "a@a.com", To: "ok@example.com", TemplateID: 1},
+		{From: "a@a.com", To: "bad@example.com", TemplateID: 9999},
+	})
+
+	// SendBatchWithTemplates must NOT return a Go error for per-item failures.
+	if err != nil {
+		t.Fatalf("SendBatchWithTemplates() should not return a Go error for per-item failures, got: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(got))
+	}
+	if got[0].ErrorCode != 0 {
+		t.Errorf("got[0].ErrorCode = %d, want 0", got[0].ErrorCode)
+	}
+	if got[1].ErrorCode != 1101 {
+		t.Errorf("got[1].ErrorCode = %d, want 1101", got[1].ErrorCode)
 	}
 }
 
@@ -720,7 +840,7 @@ func TestSendBatchWithTemplates_APIError(t *testing.T) {
 		})),
 	)
 
-	_, err := api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateId: 1}})
+	_, err := api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateID: 1}})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1110,7 +1230,7 @@ func TestEmailEndpoints_UseServerToken(t *testing.T) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, SendEmailResp{})}, nil
 		})
-		_, _ = api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateId: 1})
+		_, _ = api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateID: 1})
 	})
 
 	t.Run("SendBatchWithTemplates", func(t *testing.T) {
@@ -1118,7 +1238,7 @@ func TestEmailEndpoints_UseServerToken(t *testing.T) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, []SendEmailResp{})}, nil
 		})
-		_, _ = api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateId: 1}})
+		_, _ = api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateID: 1}})
 	})
 
 	t.Run("CreateBulkJob", func(t *testing.T) {

@@ -1,6 +1,21 @@
 // Package postmark provides a Go client for the Postmark API,
-// focused on administrative operations such as creating, reading,
-// updating, listing, and deleting Postmark Servers.
+// covering both administrative operations (creating, reading, updating,
+// listing, and deleting Postmark Servers) and email-sending operations
+// (single, batch, template, bulk).
+//
+// # Authentication
+//
+// Two authentication tokens are used, set via functional options on New():
+//
+//   - APITokenOpt — sets the account-level token used by server-management
+//     endpoints (X-Postmark-Account-Token header). Defaults to the
+//     POSTMARK_API_TOKEN environment variable.
+//
+//   - ServerTokenOpt — sets the server-level token required by all email-
+//     sending endpoints (X-Postmark-Server-Token header). There is no
+//     environment-variable default for this token; callers MUST supply it
+//     via ServerTokenOpt or every email call will fail at runtime with a
+//     descriptive error before any network request is made.
 package postmark
 
 import (
@@ -51,9 +66,15 @@ var (
 )
 
 // New creates and returns a new Postmark API client.
-// By default it reads the API token from the POSTMARK_API_TOKEN environment
-// variable and uses a 10-second timeout. Pass Option values to override
-// any of those defaults.
+// By default it reads the account API token from the POSTMARK_API_TOKEN
+// environment variable and uses a 10-second timeout. Pass Option values to
+// override any of those defaults.
+//
+// Email-sending endpoints (SendEmail, SendBatch, SendWithTemplate,
+// SendBatchWithTemplates, CreateBulkJob, GetBulkJob) require a server token
+// distinct from the account token. Supply it via ServerTokenOpt; without it
+// every email call returns an error immediately without making a network
+// request.
 func New(options ...Option) *API {
 	api := &API{
 		baseHost: "https://api.postmarkapp.com",
