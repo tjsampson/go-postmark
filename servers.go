@@ -7,12 +7,15 @@ import (
 )
 
 type (
+	// CreateServerReq is the request body for creating a new Postmark Server.
 	CreateServerReq struct {
 		Name             string `json:"Name"`
 		Color            string `json:"Color"`
 		SmtpApiActivated bool   `json:"SmtpApiActivated"`
 	}
 
+	// UpdateServerReq is the request body for updating an existing Postmark Server.
+	// Only the fields provided will be changed.
 	UpdateServerReq struct {
 		Name                       string `json:"Name"`
 		Color                      string `json:"Color"`
@@ -32,6 +35,7 @@ type (
 		EnableSmtpApiErrorHooks    bool   `json:"EnableSmtpApiErrorHooks"`
 	}
 
+	// ServerResp represents a Postmark Server as returned by the API.
 	ServerResp struct {
 		ID                         int      `json:"ID"`
 		Name                       string   `json:"Name"`
@@ -57,32 +61,41 @@ type (
 		EnableSmtpApiErrorHooks    bool     `json:"EnableSmtpApiErrorHooks"`
 	}
 
+	// ListServerResp is the response envelope returned by the list-servers endpoint.
 	ListServerResp struct {
 		TotalCount int          `json:"TotalCount"`
 		Servers    []ServerResp `json:"Servers"`
 	}
 
+	// DeleteResp is the response returned when a server is deleted.
 	DeleteResp struct {
 		ErrorCode int    `json:"ErrorCode"`
 		Message   string `json:"Message"`
 	}
 
+	// PostmarkErr represents an error response from the Postmark API,
+	// containing a numeric ErrorCode and a human-readable Message.
 	PostmarkErr struct {
 		ErrorCode int    `json:"ErrorCode"`
 		Message   string `json:"Message"`
 	}
 )
 
+// ErrExists is returned when a create operation is rejected because a server
+// with the same name already exists (HTTP 409 Conflict).
 var ErrExists = NewError(http.StatusConflict, "server already exists")
 
+// Error implements the error interface for PostmarkErr.
 func (pe PostmarkErr) Error() string {
 	return fmt.Sprintf("%s Error Code=%v", pe.Message, pe.ErrorCode)
 }
 
+// Code returns the numeric Postmark error code from the API response.
 func (pe PostmarkErr) Code() int {
 	return pe.ErrorCode
 }
 
+// NewError creates a new *PostmarkErr with the given code and formatted message.
 func NewError(code int, format string, a ...interface{}) *PostmarkErr {
 	return &PostmarkErr{
 		ErrorCode: code,
@@ -90,6 +103,8 @@ func NewError(code int, format string, a ...interface{}) *PostmarkErr {
 	}
 }
 
+// CreateServer creates a new Postmark Server with the settings in serverReq.
+// It returns the full ServerResp on success.
 func (a *API) CreateServer(serverReq *CreateServerReq) (*ServerResp, error) {
 	req, err := a.newRequest(http.MethodPost, "servers", serverReq)
 	if err != nil {
@@ -107,6 +122,7 @@ func (a *API) CreateServer(serverReq *CreateServerReq) (*ServerResp, error) {
 	return &data, nil
 }
 
+// ReadServer fetches the Postmark Server identified by serverID.
 func (a *API) ReadServer(serverID string) (*ServerResp, error) {
 	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("servers/%s", serverID), nil)
 	if err != nil {
@@ -124,6 +140,8 @@ func (a *API) ReadServer(serverID string) (*ServerResp, error) {
 	return &data, nil
 }
 
+// UpdateServer applies the changes in body to the Postmark Server identified
+// by serverID and returns the updated ServerResp.
 func (a *API) UpdateServer(serverID string, body *UpdateServerReq) (*ServerResp, error) {
 	req, err := a.newRequest(http.MethodPut, fmt.Sprintf("servers/%s", serverID), body)
 	if err != nil {
@@ -141,6 +159,8 @@ func (a *API) UpdateServer(serverID string, body *UpdateServerReq) (*ServerResp,
 	return &data, nil
 }
 
+// ListServers returns a paginated list of all Postmark Servers on the account.
+// count controls the page size and offset controls the starting position.
 func (a *API) ListServers(count, offset string) (*ListServerResp, error) {
 	req, err := a.newRequest(http.MethodGet, fmt.Sprintf("servers?count=%s&offset=%s", count, offset), nil)
 	if err != nil {
@@ -158,6 +178,8 @@ func (a *API) ListServers(count, offset string) (*ListServerResp, error) {
 	return &data, nil
 }
 
+// DeleteServer deletes the Postmark Server identified by serverId.
+// It returns a DeleteResp containing the outcome message from the API.
 func (a *API) DeleteServer(serverId string) (*DeleteResp, error) {
 	req, err := a.newRequest(http.MethodDelete, fmt.Sprintf("servers/%s", serverId), nil)
 	if err != nil {
