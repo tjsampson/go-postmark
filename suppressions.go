@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -40,8 +41,8 @@ type (
 		Suppressions []SuppressionEmail `json:"Suppressions"`
 	}
 
-	// SuppressionCreateResult represents the per-email result in a create suppressions response.
-	SuppressionCreateResult struct {
+	// SuppressionResult represents the per-email result in a create or delete suppressions response.
+	SuppressionResult struct {
 		EmailAddress string `json:"EmailAddress"`
 		Status       string `json:"Status"`
 		Message      string `json:"Message,omitempty"`
@@ -49,7 +50,7 @@ type (
 
 	// CreateSuppressionsResp is the response envelope for the create suppressions endpoint.
 	CreateSuppressionsResp struct {
-		Suppressions []SuppressionCreateResult `json:"Suppressions"`
+		Suppressions []SuppressionResult `json:"Suppressions"`
 	}
 
 	// DeleteSuppressionsReq is the request body for deleting suppressions.
@@ -57,16 +58,9 @@ type (
 		Suppressions []SuppressionEmail `json:"Suppressions"`
 	}
 
-	// SuppressionDeleteResult represents the per-email result in a delete suppressions response.
-	SuppressionDeleteResult struct {
-		EmailAddress string `json:"EmailAddress"`
-		Status       string `json:"Status"`
-		Message      string `json:"Message,omitempty"`
-	}
-
 	// DeleteSuppressionsResp is the response envelope for the delete suppressions endpoint.
 	DeleteSuppressionsResp struct {
-		Suppressions []SuppressionDeleteResult `json:"Suppressions"`
+		Suppressions []SuppressionResult `json:"Suppressions"`
 	}
 )
 
@@ -76,33 +70,34 @@ type (
 func (a *API) ListSuppressions(streamID string, params *ListSuppressionsParams) (*ListSuppressionsResp, error) {
 	path := fmt.Sprintf("message-streams/%s/suppressions/dump", streamID)
 	if params != nil {
-		first := true
-		add := func(key, val string) {
-			if val == "" {
-				return
-			}
-			if first {
-				path += "?"
-				first = false
-			} else {
-				path += "&"
-			}
-			path += key + "=" + val
+		q := url.Values{}
+		if params.SuppressionReason != "" {
+			q.Set("SuppressionReason", params.SuppressionReason)
 		}
-		add("SuppressionReason", params.SuppressionReason)
-		add("Origin", params.Origin)
-		add("EmailAddress", params.EmailAddress)
-		add("FromDate", params.FromDate)
-		add("ToDate", params.ToDate)
+		if params.Origin != "" {
+			q.Set("Origin", params.Origin)
+		}
+		if params.EmailAddress != "" {
+			q.Set("EmailAddress", params.EmailAddress)
+		}
+		if params.FromDate != "" {
+			q.Set("FromDate", params.FromDate)
+		}
+		if params.ToDate != "" {
+			q.Set("ToDate", params.ToDate)
+		}
+		if len(q) > 0 {
+			path += "?" + q.Encode()
+		}
 	}
 
-	req, err := a.newRequest(http.MethodGet, path, nil)
+	httpReq, err := a.newRequest(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data ListSuppressionsResp
@@ -116,13 +111,13 @@ func (a *API) ListSuppressions(streamID string, params *ListSuppressionsParams) 
 // for the given message stream.
 // Corresponds to POST /message-streams/{streamID}/suppressions.
 func (a *API) CreateSuppressions(streamID string, body *CreateSuppressionsReq) (*CreateSuppressionsResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions", streamID), body)
+	httpReq, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions", streamID), body)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data CreateSuppressionsResp
@@ -136,13 +131,13 @@ func (a *API) CreateSuppressions(streamID string, body *CreateSuppressionsReq) (
 // for the given message stream.
 // Corresponds to POST /message-streams/{streamID}/suppressions/delete.
 func (a *API) DeleteSuppressions(streamID string, body *DeleteSuppressionsReq) (*DeleteSuppressionsResp, error) {
-	req, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions/delete", streamID), body)
+	httpReq, err := a.newRequest(http.MethodPost, fmt.Sprintf("message-streams/%s/suppressions/delete", streamID), body)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
 
 	var data DeleteSuppressionsResp

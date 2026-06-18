@@ -1,6 +1,8 @@
 package postmark
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,13 +12,14 @@ import (
 // ---- ListSuppressions ----------------------------------------------------------
 
 func TestListSuppressions_Success(t *testing.T) {
+	wantCreatedAt := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 	want := ListSuppressionsResp{
 		Suppressions: []SuppressionResp{
 			{
 				EmailAddress:      "test@example.com",
 				SuppressionReason: "HardBounce",
 				Origin:            "Recipient",
-				CreatedAt:         time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+				CreatedAt:         wantCreatedAt,
 			},
 		},
 	}
@@ -41,22 +44,30 @@ func TestListSuppressions_Success(t *testing.T) {
 	if len(got.Suppressions) != 1 {
 		t.Fatalf("expected 1 suppression, got %d", len(got.Suppressions))
 	}
-	if got.Suppressions[0].EmailAddress != "test@example.com" {
-		t.Errorf("EmailAddress = %q, want test@example.com", got.Suppressions[0].EmailAddress)
+	s := got.Suppressions[0]
+	if s.EmailAddress != "test@example.com" {
+		t.Errorf("EmailAddress = %q, want test@example.com", s.EmailAddress)
 	}
-	if got.Suppressions[0].SuppressionReason != "HardBounce" {
-		t.Errorf("SuppressionReason = %q, want HardBounce", got.Suppressions[0].SuppressionReason)
+	if s.SuppressionReason != "HardBounce" {
+		t.Errorf("SuppressionReason = %q, want HardBounce", s.SuppressionReason)
+	}
+	if !s.CreatedAt.Equal(wantCreatedAt) {
+		t.Errorf("CreatedAt = %v, want %v", s.CreatedAt, wantCreatedAt)
 	}
 }
 
 func TestListSuppressions_WithParams(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		q := req.URL.RawQuery
-		if !strings.Contains(q, "SuppressionReason=HardBounce") {
-			t.Errorf("expected SuppressionReason param in query: %s", q)
+		q := req.URL.Query()
+		if q.Get("SuppressionReason") != "HardBounce" {
+			t.Errorf("expected SuppressionReason=HardBounce in query, got: %s", req.URL.RawQuery)
 		}
-		if !strings.Contains(q, "Origin=Recipient") {
-			t.Errorf("expected Origin param in query: %s", q)
+		if q.Get("Origin") != "Recipient" {
+			t.Errorf("expected Origin=Recipient in query, got: %s", req.URL.RawQuery)
+		}
+		// Verify that special characters in EmailAddress are properly URL-encoded.
+		if q.Get("EmailAddress") != "user+tag@example.com" {
+			t.Errorf("expected EmailAddress=user+tag@example.com (decoded), got: %q", q.Get("EmailAddress"))
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -67,6 +78,7 @@ func TestListSuppressions_WithParams(t *testing.T) {
 	params := &ListSuppressionsParams{
 		SuppressionReason: "HardBounce",
 		Origin:            "Recipient",
+		EmailAddress:      "user+tag@example.com",
 	}
 	_, err := api.ListSuppressions("outbound", params)
 	if err != nil {
@@ -94,7 +106,7 @@ func TestListSuppressions_APIError(t *testing.T) {
 
 func TestCreateSuppressions_Success(t *testing.T) {
 	want := CreateSuppressionsResp{
-		Suppressions: []SuppressionCreateResult{
+		Suppressions: []SuppressionResult{
 			{EmailAddress: "suppress@example.com", Status: "Suppressed"},
 		},
 	}
@@ -105,6 +117,18 @@ func TestCreateSuppressions_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/message-streams/outbound/suppressions") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		// Assert that the correct email address was serialised in the request body.
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var sentReq CreateSuppressionsReq
+		if err := json.Unmarshal(bodyBytes, &sentReq); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+		if len(sentReq.Suppressions) != 1 || sentReq.Suppressions[0].EmailAddress != "suppress@example.com" {
+			t.Errorf("unexpected request body suppressions: %+v", sentReq.Suppressions)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -149,7 +173,7 @@ func TestCreateSuppressions_APIError(t *testing.T) {
 
 func TestDeleteSuppressions_Success(t *testing.T) {
 	want := DeleteSuppressionsResp{
-		Suppressions: []SuppressionDeleteResult{
+		Suppressions: []SuppressionResult{
 			{EmailAddress: "suppress@example.com", Status: "Deleted"},
 		},
 	}
@@ -160,6 +184,18 @@ func TestDeleteSuppressions_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/message-streams/outbound/suppressions/delete") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		// Assert that the correct email address was serialised in the request body.
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var sentReq DeleteSuppressionsReq
+		if err := json.Unmarshal(bodyBytes, &sentReq); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+		if len(sentReq.Suppressions) != 1 || sentReq.Suppressions[0].EmailAddress != "suppress@example.com" {
+			t.Errorf("unexpected request body suppressions: %+v", sentReq.Suppressions)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

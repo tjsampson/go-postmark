@@ -1,8 +1,10 @@
 package postmark
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -45,8 +47,8 @@ func TestListWebhooks_Success(t *testing.T) {
 
 func TestListWebhooks_WithMessageStream(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.RawQuery, "MessageStream=outbound") {
-			t.Errorf("expected MessageStream query param, got: %s", req.URL.RawQuery)
+		if req.URL.Query().Get("MessageStream") != "outbound" {
+			t.Errorf("expected MessageStream=outbound query param, got: %s", req.URL.RawQuery)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -84,8 +86,8 @@ func TestGetWebhook_Success(t *testing.T) {
 		Url:           "https://example.com/hook",
 		MessageStream: "outbound",
 		Triggers: WebhookTriggers{
-			Open:    WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: false},
-			Bounce:  WebhookTriggerBounce{Enabled: true, IncludeContent: false},
+			Open:   WebhookTriggerOpen{Enabled: true, PostFirstOpenOnly: false},
+			Bounce: WebhookTriggerBounce{Enabled: true, IncludeContent: false},
 		},
 	}
 
@@ -146,6 +148,21 @@ func TestCreateWebhook_Success(t *testing.T) {
 		}
 		if !strings.HasSuffix(req.URL.Path, "/webhooks") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		// Assert the correct URL and MessageStream were serialised in the request body.
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var sentReq CreateWebhookReq
+		if err := json.Unmarshal(bodyBytes, &sentReq); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+		if sentReq.Url != "https://example.com/new-hook" {
+			t.Errorf("request body Url = %q, want https://example.com/new-hook", sentReq.Url)
+		}
+		if sentReq.MessageStream != "outbound" {
+			t.Errorf("request body MessageStream = %q, want outbound", sentReq.MessageStream)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -269,6 +286,18 @@ func TestEditWebhook_Success(t *testing.T) {
 		if !strings.HasSuffix(req.URL.Path, "/webhooks/42") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
+		// Assert the correct URL was serialised in the request body.
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		var sentReq EditWebhookReq
+		if err := json.Unmarshal(bodyBytes, &sentReq); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+		if sentReq.Url != "https://example.com/updated-hook" {
+			t.Errorf("request body Url = %q, want https://example.com/updated-hook", sentReq.Url)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
@@ -304,6 +333,22 @@ func TestEditWebhook_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestEditWebhook_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 400, Message: "invalid webhook data"}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       jsonBody(t, pmErr),
+		}, nil
+	})))
+
+	_, err := api.EditWebhook(42, &EditWebhookReq{Url: "not-a-url"})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
 	}
 }
 
@@ -348,6 +393,22 @@ func TestDeleteWebhook_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err=%v", err)
+	}
+}
+
+func TestDeleteWebhook_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal server error"}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       jsonBody(t, pmErr),
+		}, nil
+	})))
+
+	_, err := api.DeleteWebhook(42)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
 	}
 }
 
