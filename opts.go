@@ -26,10 +26,10 @@ func APITokenOpt(token string) Option {
 // used in the X-Postmark-Server-Token request header. This token is required
 // for email-sending endpoints (/email, /email/batch, /email/batchWithTemplates).
 //
-// WARNING: if ServerTokenOpt is never called (or is called with an empty
-// string), newServerRequest will send an empty X-Postmark-Server-Token header,
-// which Postmark will reject with an authentication error. Always supply a
-// non-empty token when using any of the SendEmail* methods.
+// If ServerTokenOpt is never called (or is called with an empty string),
+// newServerRequest will return an error immediately rather than sending an
+// unauthenticated request to Postmark. Always supply a non-empty token when
+// using any of the SendEmail* methods.
 func ServerTokenOpt(token string) Option {
 	return func(api *API) {
 		api.serverToken = token

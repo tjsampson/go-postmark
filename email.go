@@ -13,7 +13,10 @@ import (
 type TrackLinksValue string
 
 const (
-	// TrackLinksNone disables link tracking entirely.
+	// TrackLinksNone explicitly disables link tracking. This is distinct from
+	// omitting the TrackLinks field entirely: omitting the field (leaving it as
+	// the zero value "") causes Postmark to use the message-stream default,
+	// whereas TrackLinksNone overrides the stream default to "no tracking".
 	TrackLinksNone TrackLinksValue = "None"
 	// TrackLinksHtmlAndText enables link tracking in both HTML and plain-text parts.
 	TrackLinksHtmlAndText TrackLinksValue = "HtmlAndText"
@@ -47,9 +50,13 @@ type (
 	// A nil value causes the field to be omitted, which lets the message-stream
 	// default take effect — the same behaviour as not setting the field at all.
 	//
-	// TrackLinks must be one of the TrackLinksValue constants (None, HtmlAndText,
-	// HtmlOnly, TextOnly). An unrecognised value will be rejected by the Postmark
-	// API with an error at send time.
+	// TrackLinks uses omitempty with the zero value "" (not a valid Postmark
+	// value). Leaving TrackLinks unset (zero value) omits the field and defers
+	// to the message-stream default. Set TrackLinksNone to explicitly disable
+	// link tracking regardless of the stream default — these are distinct
+	// behaviours on Postmark's side. Must be one of the TrackLinksValue
+	// constants (None, HtmlAndText, HtmlOnly, TextOnly); any other string will
+	// be rejected by the Postmark API with an error at send time.
 	SendEmailReq struct {
 		From          string            `json:"From"`
 		To            string            `json:"To"`
@@ -89,6 +96,11 @@ type (
 	// Either TemplateID or TemplateAlias must be supplied; both may not be omitted.
 	// SendEmailBatchWithTemplates performs a pre-flight check and returns an error
 	// if neither field is set on any message in the batch.
+	//
+	// TemplateID uses json:"TemplateId,omitempty". The zero value (0) is correctly
+	// omitted: 0 is not a valid Postmark template ID, so an absent TemplateID in
+	// JSON causes no unintended side-effects. When a non-zero TemplateID is set it
+	// takes precedence; TemplateAlias is ignored by Postmark if TemplateID is set.
 	//
 	// InlineCss is a *bool so that an explicit false is serialised correctly
 	// (see SendEmailReq.TrackOpens for the full rationale).

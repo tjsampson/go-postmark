@@ -289,6 +289,40 @@ func TestSendEmail_TrackLinksValue(t *testing.T) {
 	}
 }
 
+// TestSendEmail_TrackLinksOmitted verifies that leaving TrackLinks as the zero
+// value ("") causes the field to be omitted from the JSON payload entirely,
+// which defers to the message-stream default — distinct from setting
+// TrackLinksNone, which explicitly disables link tracking.
+func TestSendEmail_TrackLinksOmitted(t *testing.T) {
+	var capturedBody map[string]any
+
+	api := New(
+		ServerTokenOpt("srv-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+
+	// TrackLinks is intentionally left at its zero value.
+	_, err := api.SendEmail(&SendEmailReq{
+		From: "f@example.com",
+		To:   "t@example.com",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, present := capturedBody["TrackLinks"]; present {
+		t.Error("TrackLinks should be absent from JSON when zero value; omitting defers to stream default")
+	}
+}
+
 // ---- SendEmailBatch ------------------------------------------------------------
 
 func TestSendEmailBatch_Success(t *testing.T) {
@@ -412,6 +446,23 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+}
+
+// TestSendEmailBatch_EmptyServerToken verifies that SendEmailBatch returns an
+// error immediately (not a silent 401 from Postmark) when no server token has
+// been configured. The empty-token guard fires after the batch pre-flight
+// checks, so the batch must be non-empty for this test to reach the token check.
+func TestSendEmailBatch_EmptyServerToken(t *testing.T) {
+	api := New() // no ServerTokenOpt
+	_, err := api.SendEmailBatch([]*SendEmailReq{
+		{From: "f@example.com", To: "t@example.com"},
+	})
+	if err == nil {
+		t.Fatal("expected an error when serverToken is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "serverToken is not set") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
@@ -606,6 +657,25 @@ func TestSendEmailBatchWithTemplates_NilRequest(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nil") {
 		t.Errorf("error message should mention nil, got: %v", err)
+	}
+}
+
+// TestSendEmailBatchWithTemplates_EmptyServerToken verifies that
+// SendEmailBatchWithTemplates returns an error immediately (not a silent 401
+// from Postmark) when no server token has been configured. The empty-token guard
+// fires after all pre-flight validation, so the batch must be valid to reach it.
+func TestSendEmailBatchWithTemplates_EmptyServerToken(t *testing.T) {
+	api := New() // no ServerTokenOpt
+	_, err := api.SendEmailBatchWithTemplates(&SendBatchWithTemplatesReq{
+		Messages: []*TemplateMessage{
+			{From: "f@example.com", To: "t@example.com", TemplateID: 1},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an error when serverToken is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "serverToken is not set") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
