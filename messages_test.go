@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// ---- SearchOutboundMessages ---------------------------------------------------
-
 func TestSearchOutboundMessages_Success(t *testing.T) {
 	want := ListOutboundMessagesResp{
 		TotalCount: 2,
@@ -52,7 +50,7 @@ func TestSearchOutboundMessages_WithFilters(t *testing.T) {
 		check  func(t *testing.T, query string)
 	}{
 		{
-			name: "with recipient filter",
+			name:   "with recipient filter",
 			params: OutboundMessageSearchParams{Count: 5, Offset: 0, Recipient: "user@example.com"},
 			check: func(t *testing.T, query string) {
 				if !strings.Contains(query, "recipient=user%40example.com") {
@@ -61,7 +59,7 @@ func TestSearchOutboundMessages_WithFilters(t *testing.T) {
 			},
 		},
 		{
-			name: "with status filter",
+			name:   "with status filter",
 			params: OutboundMessageSearchParams{Count: 5, Offset: 0, Status: "sent"},
 			check: func(t *testing.T, query string) {
 				if !strings.Contains(query, "status=sent") {
@@ -70,7 +68,7 @@ func TestSearchOutboundMessages_WithFilters(t *testing.T) {
 			},
 		},
 		{
-			name: "with date range",
+			name:   "with date range",
 			params: OutboundMessageSearchParams{Count: 5, Offset: 0, FromDate: "2024-01-01", ToDate: "2024-01-31"},
 			check: func(t *testing.T, query string) {
 				if !strings.Contains(query, "fromdate=2024-01-01") {
@@ -110,8 +108,6 @@ func TestSearchOutboundMessages_APIError(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// ---- GetOutboundMessageDetails -----------------------------------------------
 
 func TestGetOutboundMessageDetails_Success(t *testing.T) {
 	want := OutboundMessageDetailsResp{
@@ -159,8 +155,6 @@ func TestGetOutboundMessageDetails_NotFound(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundMessageDump --------------------------------------------------
-
 func TestGetOutboundMessageDump_Success(t *testing.T) {
 	want := MessageDumpResp{Body: "MIME-Version: 1.0\r\nFrom: sender@example.com\r\n..."}
 
@@ -185,8 +179,6 @@ func TestGetOutboundMessageDump_Success(t *testing.T) {
 		t.Error("expected non-empty Body")
 	}
 }
-
-// ---- GetOutboundMessageOpens -------------------------------------------------
 
 func TestGetOutboundMessageOpens_Success(t *testing.T) {
 	want := ListOutboundOpensResp{
@@ -264,8 +256,6 @@ func TestGetOutboundMessageOpens_WithFilters(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundMessageOpensByMessageID -------------------------------------
-
 func TestGetOutboundMessageOpensByMessageID_Success(t *testing.T) {
 	want := ListOutboundOpensResp{
 		TotalCount: 1,
@@ -298,8 +288,6 @@ func TestGetOutboundMessageOpensByMessageID_Success(t *testing.T) {
 		t.Errorf("TotalCount = %d, want 1", got.TotalCount)
 	}
 }
-
-// ---- GetOutboundMessageClicks -----------------------------------------------
 
 func TestGetOutboundMessageClicks_Success(t *testing.T) {
 	want := ListOutboundClicksResp{
@@ -374,8 +362,6 @@ func TestGetOutboundMessageClicks_WithFilters(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundMessageClicksByMessageID ------------------------------------
-
 func TestGetOutboundMessageClicksByMessageID_Success(t *testing.T) {
 	want := ListOutboundClicksResp{
 		TotalCount: 2,
@@ -408,8 +394,6 @@ func TestGetOutboundMessageClicksByMessageID_Success(t *testing.T) {
 		t.Errorf("TotalCount = %d, want 2", got.TotalCount)
 	}
 }
-
-// ---- SearchInboundMessages --------------------------------------------------
 
 func TestSearchInboundMessages_Success(t *testing.T) {
 	want := ListInboundMessagesResp{
@@ -487,8 +471,6 @@ func TestSearchInboundMessages_WithFilters(t *testing.T) {
 	}
 }
 
-// ---- GetInboundMessageDetails -----------------------------------------------
-
 func TestGetInboundMessageDetails_Success(t *testing.T) {
 	want := InboundMessageDetailsResp{
 		MessageID: "inbound-42",
@@ -532,8 +514,6 @@ func TestGetInboundMessageDetails_NotFound(t *testing.T) {
 	}
 }
 
-// ---- BypassInboundMessageRules ----------------------------------------------
-
 func TestBypassInboundMessageRules_Success(t *testing.T) {
 	want := InboundBypassResp{ErrorCode: 0, Message: "OK"}
 
@@ -572,8 +552,6 @@ func TestBypassInboundMessageRules_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// ---- RetryInboundMessage ----------------------------------------------------
 
 func TestRetryInboundMessage_Success(t *testing.T) {
 	want := InboundRetryResp{ErrorCode: 0, Message: "OK"}

@@ -29,12 +29,6 @@ type (
 
 // ListInboundRules returns a paginated list of inbound rules.
 // GET /triggers/inboundrules
-//
-// The query string is appended directly to the path string, which is safe
-// because newRequest passes it verbatim to fmt.Sprintf("%s/%s", baseHost, path)
-// — the resulting URL is parsed by http.NewRequest and Go's net/url correctly
-// splits the path and query components. This is the same approach used by
-// ListServers in servers.go.
 func (a *API) ListInboundRules(count, offset int) (*ListInboundRulesResp, error) {
 	q := url.Values{}
 	q.Set("count", strconv.Itoa(count))

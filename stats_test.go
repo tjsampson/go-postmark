@@ -8,12 +8,10 @@ import (
 
 // statsEndpointTest is a table-driven helper for verifying stats endpoints.
 type statsEndpointTest struct {
-	name           string
-	expectedPath   string
-	params         StatsParams
+	name         string
+	expectedPath string
+	params       StatsParams
 }
-
-// ---- GetOutboundStats --------------------------------------------------------
 
 func TestGetOutboundStats_Success(t *testing.T) {
 	want := OutboundStatsResp{
@@ -99,8 +97,6 @@ func TestGetOutboundStats_APIError(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundSendCounts --------------------------------------------------
-
 func TestGetOutboundSendCounts_Success(t *testing.T) {
 	want := SendCountsResp{
 		Sent: 50,
@@ -134,8 +130,6 @@ func TestGetOutboundSendCounts_Success(t *testing.T) {
 		t.Errorf("len(Days) = %d, want 2", len(got.Days))
 	}
 }
-
-// ---- GetOutboundBounceCounts ------------------------------------------------
 
 func TestGetOutboundBounceCounts_Success(t *testing.T) {
 	want := BounceCountsResp{
@@ -171,8 +165,6 @@ func TestGetOutboundBounceCounts_Success(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundSpamCounts --------------------------------------------------
-
 func TestGetOutboundSpamCounts_Success(t *testing.T) {
 	want := SpamCountsResp{
 		SpamComplaint: 2,
@@ -201,8 +193,6 @@ func TestGetOutboundSpamCounts_Success(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundTrackedEmailCounts ------------------------------------------
-
 func TestGetOutboundTrackedEmailCounts_Success(t *testing.T) {
 	want := TrackedEmailCountsResp{
 		Tracked: 80,
@@ -230,8 +220,6 @@ func TestGetOutboundTrackedEmailCounts_Success(t *testing.T) {
 		t.Errorf("Tracked = %d, want 80", got.Tracked)
 	}
 }
-
-// ---- GetOutboundOpenCounts --------------------------------------------------
 
 func TestGetOutboundOpenCounts_Success(t *testing.T) {
 	want := OpenCountsResp{
@@ -264,8 +252,6 @@ func TestGetOutboundOpenCounts_Success(t *testing.T) {
 		t.Errorf("UniqueOpens = %d, want 45", got.UniqueOpens)
 	}
 }
-
-// ---- GetOutboundOpenPlatforms -----------------------------------------------
 
 func TestGetOutboundOpenPlatforms_Success(t *testing.T) {
 	want := OpenPlatformsResp{
@@ -300,8 +286,6 @@ func TestGetOutboundOpenPlatforms_Success(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundOpenEmailClients --------------------------------------------
-
 func TestGetOutboundOpenEmailClients_Success(t *testing.T) {
 	want := OpenEmailClientsResp{
 		EmailClients: []EmailClientUsage{
@@ -331,8 +315,6 @@ func TestGetOutboundOpenEmailClients_Success(t *testing.T) {
 		t.Errorf("len(EmailClients) = %d, want 2", len(got.EmailClients))
 	}
 }
-
-// ---- GetOutboundClickCounts -------------------------------------------------
 
 func TestGetOutboundClickCounts_Success(t *testing.T) {
 	want := ClickCountsResp{
@@ -366,8 +348,6 @@ func TestGetOutboundClickCounts_Success(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundClickBrowserFamilies ----------------------------------------
-
 func TestGetOutboundClickBrowserFamilies_Success(t *testing.T) {
 	want := ClickBrowserFamiliesResp{
 		BrowserFamilies: []BrowserFamilyUsage{
@@ -397,8 +377,6 @@ func TestGetOutboundClickBrowserFamilies_Success(t *testing.T) {
 		t.Errorf("len(BrowserFamilies) = %d, want 2", len(got.BrowserFamilies))
 	}
 }
-
-// ---- GetOutboundClickPlatforms ----------------------------------------------
 
 func TestGetOutboundClickPlatforms_Success(t *testing.T) {
 	want := ClickPlatformsResp{
@@ -430,8 +408,6 @@ func TestGetOutboundClickPlatforms_Success(t *testing.T) {
 	}
 }
 
-// ---- GetOutboundClickLocations ----------------------------------------------
-
 func TestGetOutboundClickLocations_Success(t *testing.T) {
 	want := ClickLocationsResp{
 		Locations: []ClickLocationUsage{
@@ -461,8 +437,6 @@ func TestGetOutboundClickLocations_Success(t *testing.T) {
 		t.Errorf("len(Locations) = %d, want 2", len(got.Locations))
 	}
 }
-
-// ---- StatsParams query encoding test ----------------------------------------
 
 func TestStatsParams_QueryEncoding(t *testing.T) {
 	tests := []struct {

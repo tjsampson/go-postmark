@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// ---- ListInboundRules -------------------------------------------------------
-
 func TestListInboundRules_Success(t *testing.T) {
 	want := ListInboundRulesResp{
 		TotalCount: 2,
@@ -90,10 +88,12 @@ func TestListInboundRules_Pagination(t *testing.T) {
 }
 
 func TestListInboundRules_APIError(t *testing.T) {
+	wantErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+			Body:       jsonBody(t, wantErr),
 		}, nil
 	})))
 
@@ -101,9 +101,10 @@ func TestListInboundRules_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, &wantErr) {
+		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	}
 }
-
-// ---- CreateInboundRule ------------------------------------------------------
 
 func TestCreateInboundRule_Success(t *testing.T) {
 	want := InboundRuleResp{ID: 42, Rule: "newrule.example.com"}
@@ -115,7 +116,6 @@ func TestCreateInboundRule_Success(t *testing.T) {
 		if !strings.HasSuffix(req.URL.Path, "triggers/inboundrules") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
-		// Verify request body contains the Rule field
 		var body map[string]interface{}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
@@ -179,10 +179,12 @@ func TestCreateInboundRule_Various(t *testing.T) {
 }
 
 func TestCreateInboundRule_APIError(t *testing.T) {
+	wantErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+			Body:       jsonBody(t, wantErr),
 		}, nil
 	})))
 
@@ -190,9 +192,10 @@ func TestCreateInboundRule_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, &wantErr) {
+		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	}
 }
-
-// ---- DeleteInboundRule ------------------------------------------------------
 
 func TestDeleteInboundRule_Success(t *testing.T) {
 	want := DeleteResp{Message: "Trigger deleted."}
@@ -242,16 +245,16 @@ func TestDeleteInboundRule_PathContainsTriggerID(t *testing.T) {
 		triggerID int64
 		wantPath  string
 	}{
-		{name: "trigger id 1", triggerID: 1, wantPath: "triggers/inboundrules/1"},
-		{name: "trigger id 999", triggerID: 999, wantPath: "triggers/inboundrules/999"},
-		{name: "large trigger id", triggerID: 123456789, wantPath: "triggers/inboundrules/123456789"},
+		{name: "trigger id 1", triggerID: 1, wantPath: "/triggers/inboundrules/1"},
+		{name: "trigger id 999", triggerID: 999, wantPath: "/triggers/inboundrules/999"},
+		{name: "large trigger id", triggerID: 123456789, wantPath: "/triggers/inboundrules/123456789"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-				if !strings.HasSuffix(req.URL.Path, tc.wantPath) {
-					t.Errorf("expected path suffix %s, got %s", tc.wantPath, req.URL.Path)
+				if req.URL.Path != tc.wantPath {
+					t.Errorf("path = %s, want %s", req.URL.Path, tc.wantPath)
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,

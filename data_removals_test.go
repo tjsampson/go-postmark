@@ -4,77 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 )
 
-// ---- RequestDataRemoval -----------------------------------------------------
-
-func TestRequestDataRemoval_Success(t *testing.T) {
-	want := DataRemovalResp{
-		ID:           101,
-		EmailAddress: "user@example.com",
-		Status:       "Pending",
-		RequestedAt:  "2024-01-15T12:00:00Z",
-	}
-
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", req.Method)
-		}
-		if !strings.HasSuffix(req.URL.Path, "data-removals") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
-		}
-		// Verify request body
-		var body map[string]interface{}
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
-		}
-		if body["EmailAddress"] != "user@example.com" {
-			t.Errorf("expected EmailAddress=user@example.com, got %v", body["EmailAddress"])
-		}
-		if body["RequestedBy"] != "admin@example.com" {
-			t.Errorf("expected RequestedBy=admin@example.com, got %v", body["RequestedBy"])
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       jsonBody(t, want),
-		}, nil
-	})))
-
-	got, err := api.RequestDataRemoval(&DataRemovalReq{
-		EmailAddress: "user@example.com",
-		RequestedBy:  "admin@example.com",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.ID != 101 {
-		t.Errorf("ID = %d, want 101", got.ID)
-	}
-	if got.EmailAddress != "user@example.com" {
-		t.Errorf("EmailAddress = %q, want user@example.com", got.EmailAddress)
-	}
-	if got.Status != "Pending" {
-		t.Errorf("Status = %q, want Pending", got.Status)
-	}
-	if got.RequestedAt != "2024-01-15T12:00:00Z" {
-		t.Errorf("RequestedAt = %q, want 2024-01-15T12:00:00Z", got.RequestedAt)
-	}
-}
-
-func TestRequestDataRemoval_Various(t *testing.T) {
+func TestRequestDataRemoval(t *testing.T) {
 	tests := []struct {
-		name string
-		req  *DataRemovalReq
+		name        string
+		req         *DataRemovalReq
+		wantID      int64
+		wantStatus  string
+		wantReqAt   string
 	}{
 		{
-			name: "basic removal request",
-			req:  &DataRemovalReq{EmailAddress: "alice@example.com", RequestedBy: "admin@example.com"},
+			name:       "basic removal request",
+			req:        &DataRemovalReq{EmailAddress: "alice@example.com", RequestedBy: "admin@example.com"},
+			wantID:     101,
+			wantStatus: "Pending",
+			wantReqAt:  "2024-01-15T12:00:00Z",
 		},
 		{
-			name: "removal with different emails",
-			req:  &DataRemovalReq{EmailAddress: "bob@company.org", RequestedBy: "gdpr@company.org"},
+			name:       "removal with different emails",
+			req:        &DataRemovalReq{EmailAddress: "bob@company.org", RequestedBy: "gdpr@company.org"},
+			wantID:     102,
+			wantStatus: "Pending",
+			wantReqAt:  "2024-01-15T00:00:00Z",
 		},
 	}
 
@@ -82,7 +35,20 @@ func TestRequestDataRemoval_Various(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			expectedEmail := tc.req.EmailAddress
 			expectedBy := tc.req.RequestedBy
+			resp := DataRemovalResp{
+				ID:           tc.wantID,
+				EmailAddress: expectedEmail,
+				Status:       tc.wantStatus,
+				RequestedAt:  tc.wantReqAt,
+			}
+
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+				if req.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", req.Method)
+				}
+				if req.URL.Path != "/data-removals" {
+					t.Errorf("path = %s, want /data-removals", req.URL.Path)
+				}
 				var body map[string]interface{}
 				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 					t.Fatalf("failed to decode request body: %v", err)
@@ -95,30 +61,37 @@ func TestRequestDataRemoval_Various(t *testing.T) {
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Body: jsonBody(t, DataRemovalResp{
-						ID:           1,
-						EmailAddress: expectedEmail,
-						Status:       "Pending",
-						RequestedAt:  "2024-01-15T00:00:00Z",
-					}),
+					Body:       jsonBody(t, resp),
 				}, nil
 			})))
+
 			got, err := api.RequestDataRemoval(tc.req)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
+			if got.ID != tc.wantID {
+				t.Errorf("ID = %d, want %d", got.ID, tc.wantID)
+			}
 			if got.EmailAddress != expectedEmail {
 				t.Errorf("EmailAddress = %q, want %q", got.EmailAddress, expectedEmail)
+			}
+			if got.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", got.Status, tc.wantStatus)
+			}
+			if got.RequestedAt != tc.wantReqAt {
+				t.Errorf("RequestedAt = %q, want %q", got.RequestedAt, tc.wantReqAt)
 			}
 		})
 	}
 }
 
 func TestRequestDataRemoval_APIError(t *testing.T) {
+	wantErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "server error"}),
+			Body:       jsonBody(t, wantErr),
 		}, nil
 	})))
 
@@ -126,9 +99,10 @@ func TestRequestDataRemoval_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !errors.Is(err, &wantErr) {
+		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
+	}
 }
-
-// ---- GetDataRemoval ---------------------------------------------------------
 
 func TestGetDataRemoval_Success(t *testing.T) {
 	want := DataRemovalResp{
@@ -142,8 +116,8 @@ func TestGetDataRemoval_Success(t *testing.T) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
-		if !strings.HasSuffix(req.URL.Path, "data-removals/202") {
-			t.Errorf("unexpected path: %s", req.URL.Path)
+		if req.URL.Path != "/data-removals/202" {
+			t.Errorf("path = %s, want /data-removals/202", req.URL.Path)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -189,16 +163,16 @@ func TestGetDataRemoval_PathContainsID(t *testing.T) {
 		removalID int64
 		wantPath  string
 	}{
-		{name: "id 1", removalID: 1, wantPath: "data-removals/1"},
-		{name: "id 500", removalID: 500, wantPath: "data-removals/500"},
-		{name: "large id", removalID: 987654321, wantPath: "data-removals/987654321"},
+		{name: "id 1", removalID: 1, wantPath: "/data-removals/1"},
+		{name: "id 500", removalID: 500, wantPath: "/data-removals/500"},
+		{name: "large id", removalID: 987654321, wantPath: "/data-removals/987654321"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-				if !strings.HasSuffix(req.URL.Path, tc.wantPath) {
-					t.Errorf("expected path suffix %s, got %s", tc.wantPath, req.URL.Path)
+				if req.URL.Path != tc.wantPath {
+					t.Errorf("path = %s, want %s", req.URL.Path, tc.wantPath)
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -220,15 +194,20 @@ func TestGetDataRemoval_PathContainsID(t *testing.T) {
 }
 
 func TestGetDataRemoval_APIError(t *testing.T) {
+	wantErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
+
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       jsonBody(t, PostmarkErr{ErrorCode: 500, Message: "internal error"}),
+			Body:       jsonBody(t, wantErr),
 		}, nil
 	})))
 
 	_, err := api.GetDataRemoval(1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, &wantErr) {
+		t.Errorf("expected errors.Is(err, PostmarkErr{500}), got err=%v", err)
 	}
 }
