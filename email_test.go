@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
-
-// boolPtr is a test helper that returns a pointer to a bool value.
-func boolPtr(b bool) *bool { return &b }
 
 // ---- SendEmail -----------------------------------------------------------------
 
 func TestSendEmail_Success(t *testing.T) {
+	submittedAt, _ := time.Parse(time.RFC3339, "2024-01-01T00:00:00Z")
+
 	tests := []struct {
 		name string
 		req  *EmailReq
@@ -28,7 +28,7 @@ func TestSendEmail_Success(t *testing.T) {
 			},
 			want: EmailResp{
 				To:          "recipient@example.com",
-				SubmittedAt: "2024-01-01T00:00:00Z",
+				SubmittedAt: submittedAt,
 				MessageID:   "abc-123",
 				ErrorCode:   0,
 				Message:     "OK",
@@ -47,7 +47,7 @@ func TestSendEmail_Success(t *testing.T) {
 			},
 			want: EmailResp{
 				To:          "recipient@example.com",
-				SubmittedAt: "2024-01-01T00:00:00Z",
+				SubmittedAt: submittedAt,
 				MessageID:   "def-456",
 				ErrorCode:   0,
 				Message:     "OK",
@@ -67,7 +67,7 @@ func TestSendEmail_Success(t *testing.T) {
 			},
 			want: EmailResp{
 				To:          "recipient@example.com",
-				SubmittedAt: "2024-01-02T00:00:00Z",
+				SubmittedAt: submittedAt,
 				MessageID:   "ghi-789",
 				ErrorCode:   0,
 				Message:     "OK",
@@ -105,8 +105,8 @@ func TestSendEmail_Success(t *testing.T) {
 						t.Errorf("unexpected path: %s", req.URL.Path)
 					}
 					// Verify server token header is set (not account token).
-					if req.Header.Get("X-Postmark-Server-Token") != "test-server-token" {
-						t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+					if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+						t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 					}
 					if req.Header.Get("X-Postmark-Account-Token") != "" {
 						t.Errorf("unexpected X-Postmark-Account-Token header on email request")
@@ -268,17 +268,41 @@ func TestSendEmail_APIError(t *testing.T) {
 	}
 }
 
+// TestSendEmail_MissingServerToken verifies that SendEmail returns an error
+// immediately (without making an HTTP request) when no server token is configured.
+func TestSendEmail_MissingServerToken(t *testing.T) {
+	api := New(
+		// Deliberately omit ServerTokenOpt.
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called when serverToken is empty")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&EmailReq{
+		From:    "sender@example.com",
+		To:      "recipient@example.com",
+		Subject: "Test",
+	})
+	if err == nil {
+		t.Fatal("expected an error for missing server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token not configured") {
+		t.Errorf("expected error to mention missing server token, got: %v", err)
+	}
+}
+
 // ---- SendEmailBatch ------------------------------------------------------------
 
 func TestSendEmailBatch_Success(t *testing.T) {
 	tests := []struct {
 		name string
-		reqs []EmailReq
+		reqs []*EmailReq
 		want BatchEmailResp
 	}{
 		{
 			name: "single message batch",
-			reqs: []EmailReq{
+			reqs: []*EmailReq{
 				{
 					From:     "sender@example.com",
 					To:       "recipient@example.com",
@@ -288,17 +312,16 @@ func TestSendEmailBatch_Success(t *testing.T) {
 			},
 			want: BatchEmailResp{
 				{
-					To:          "recipient@example.com",
-					SubmittedAt: "2024-01-01T00:00:00Z",
-					MessageID:   "batch-msg-1",
-					ErrorCode:   0,
-					Message:     "OK",
+					To:        "recipient@example.com",
+					MessageID: "batch-msg-1",
+					ErrorCode: 0,
+					Message:   "OK",
 				},
 			},
 		},
 		{
 			name: "multiple messages batch",
-			reqs: []EmailReq{
+			reqs: []*EmailReq{
 				{From: "a@example.com", To: "b@example.com", Subject: "Msg 1", TextBody: "Body 1"},
 				{From: "a@example.com", To: "c@example.com", Subject: "Msg 2", TextBody: "Body 2"},
 				{From: "a@example.com", To: "d@example.com", Subject: "Msg 3", HTMLBody: "<p>Body 3</p>"},
@@ -324,8 +347,8 @@ func TestSendEmailBatch_Success(t *testing.T) {
 						t.Errorf("unexpected path: %s", req.URL.Path)
 					}
 					// Verify server token header.
-					if req.Header.Get("X-Postmark-Server-Token") != "test-server-token" {
-						t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+					if got := req.Header.Get("X-Postmark-Server-Token"); got != "test-server-token" {
+						t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "test-server-token")
 					}
 					if req.Header.Get("X-Postmark-Account-Token") != "" {
 						t.Errorf("unexpected X-Postmark-Account-Token header on batch email request")
@@ -370,7 +393,7 @@ func TestSendEmailBatch_EmptySlice(t *testing.T) {
 		})),
 	)
 
-	_, err := api.SendEmailBatch([]EmailReq{})
+	_, err := api.SendEmailBatch([]*EmailReq{})
 	if err == nil {
 		t.Fatal("expected an error for empty batch, got nil")
 	}
@@ -384,9 +407,9 @@ func TestSendEmailBatch_EmptySlice(t *testing.T) {
 // any HTTP request.
 func TestSendEmailBatch_ExceedsMaxSize(t *testing.T) {
 	// Build a slice of 501 minimal EmailReq values.
-	reqs := make([]EmailReq, 501)
+	reqs := make([]*EmailReq, 501)
 	for i := range reqs {
-		reqs[i] = EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
+		reqs[i] = &EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
 	}
 
 	// The mock transport must never be called; if it is, fail loudly.
@@ -404,6 +427,62 @@ func TestSendEmailBatch_ExceedsMaxSize(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Errorf("expected error message to mention batch size limit, got: %v", err)
+	}
+}
+
+// TestSendEmailBatch_ExactlyMaxSize asserts that a batch of exactly 500
+// messages is accepted (boundary condition: len == 500 must succeed).
+func TestSendEmailBatch_ExactlyMaxSize(t *testing.T) {
+	reqs := make([]*EmailReq, 500)
+	for i := range reqs {
+		reqs[i] = &EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
+	}
+
+	// Build a matching response slice of 500 elements.
+	wantResp := make(BatchEmailResp, 500)
+	for i := range wantResp {
+		wantResp[i] = EmailResp{To: "b@example.com", ErrorCode: 0, Message: "OK"}
+	}
+
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, wantResp),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendEmailBatch(reqs)
+	if err != nil {
+		t.Fatalf("unexpected error for batch of exactly 500: %v", err)
+	}
+	if len(got) != 500 {
+		t.Errorf("batch response length = %d, want 500", len(got))
+	}
+}
+
+// TestSendEmailBatch_MissingServerToken verifies that SendEmailBatch returns
+// an error immediately (without making an HTTP request) when no server token
+// is configured.
+func TestSendEmailBatch_MissingServerToken(t *testing.T) {
+	api := New(
+		// Deliberately omit ServerTokenOpt.
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called when serverToken is empty")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.SendEmailBatch([]*EmailReq{
+		{From: "a@example.com", To: "b@example.com", Subject: "Test"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for missing server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token not configured") {
+		t.Errorf("expected error to mention missing server token, got: %v", err)
 	}
 }
 
@@ -447,7 +526,7 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 				})),
 			)
 
-			_, err := api.SendEmailBatch([]EmailReq{
+			_, err := api.SendEmailBatch([]*EmailReq{
 				{From: "a@example.com", To: "b@example.com", Subject: "Test"},
 			})
 
@@ -553,6 +632,20 @@ func TestNewServerRequest_UsesServerToken(t *testing.T) {
 	}
 	if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
 		t.Errorf("X-Postmark-Account-Token should not be set, got %q", got)
+	}
+}
+
+// TestNewServerRequest_EmptyToken verifies that newServerRequest returns an
+// error (without building a request) when no server token has been configured.
+func TestNewServerRequest_EmptyToken(t *testing.T) {
+	api := New() // no ServerTokenOpt
+
+	_, err := api.newServerRequest(http.MethodPost, "email", nil)
+	if err == nil {
+		t.Fatal("expected an error for empty server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token not configured") {
+		t.Errorf("expected error to mention missing server token, got: %v", err)
 	}
 }
 

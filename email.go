@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type (
@@ -45,6 +46,9 @@ type (
 		// TextBody is the plain-text body of the email.
 		TextBody string `json:"TextBody,omitempty"`
 		// HTMLBody is the HTML body of the email.
+		// Note: the JSON tag deliberately uses "HtmlBody" (not "HTMLBody") to
+		// match the Postmark API schema, which uses mixed-case rather than the
+		// all-caps acronym convention used by Go.
 		HTMLBody string `json:"HtmlBody,omitempty"`
 		// Tag is an optional tag for categorising the email in Postmark.
 		Tag string `json:"Tag,omitempty"`
@@ -69,8 +73,8 @@ type (
 	EmailResp struct {
 		// To is the recipient email address the message was sent to.
 		To string `json:"To"`
-		// SubmittedAt is the timestamp when the message was submitted.
-		SubmittedAt string `json:"SubmittedAt"`
+		// SubmittedAt is the RFC 3339 timestamp when the message was submitted.
+		SubmittedAt time.Time `json:"SubmittedAt"`
 		// MessageID is the unique identifier assigned by Postmark for the message.
 		MessageID string `json:"MessageID"`
 		// ErrorCode is the Postmark error code (0 indicates success).
@@ -89,7 +93,10 @@ type (
 const maxBatchSize = 500
 
 // SendEmail sends a single email via the Postmark API (POST /email).
-// It uses the server token (X-Postmark-Server-Token) for authentication.
+// It uses the server token (X-Postmark-Server-Token) for authentication;
+// configure the token with ServerTokenOpt when calling New. If no server
+// token has been set, SendEmail returns an error immediately without making
+// an HTTP request.
 // If the HTTP response is 2xx but the Postmark ErrorCode is non-zero,
 // SendEmail returns a non-nil error so callers are never silently given a
 // failed send with a nil error.
@@ -120,12 +127,18 @@ func (a *API) SendEmail(req *EmailReq) (*EmailResp, error) {
 }
 
 // SendEmailBatch sends a batch of up to 500 emails via the Postmark API
-// (POST /email/batch). It returns an error immediately if the slice is empty
-// or contains more than 500 messages, avoiding a pointless round-trip.
+// (POST /email/batch). It uses the server token (X-Postmark-Server-Token)
+// for authentication; configure the token with ServerTokenOpt when calling
+// New. If no server token has been set, SendEmailBatch returns an error
+// immediately without making an HTTP request.
+// It also returns an error immediately if the slice is empty or contains
+// more than 500 messages, avoiding a pointless round-trip.
 // Each element in the returned BatchEmailResp corresponds to one email in
 // the request slice. Note that individual elements may carry a non-zero
 // ErrorCode; callers should inspect each EmailResp in the returned slice.
-func (a *API) SendEmailBatch(reqs []EmailReq) (BatchEmailResp, error) {
+// Unlike SendEmail, no aggregate error is returned for per-message failures
+// within the batch — each entry must be checked individually.
+func (a *API) SendEmailBatch(reqs []*EmailReq) (BatchEmailResp, error) {
 	if len(reqs) == 0 {
 		return nil, errors.New("postmark: batch must contain at least one message")
 	}

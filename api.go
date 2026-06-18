@@ -6,6 +6,7 @@ package postmark
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,7 +130,12 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 // X-Postmark-Account-Token. This is required for email-sending endpoints which
 // operate at the server level. If body is non-nil it is JSON-encoded as the
 // request body and Content-Type is set to application/json.
+// It returns an error immediately if no server token has been configured via
+// ServerTokenOpt, surfacing the misconfiguration before any network call is made.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	if a.serverToken == "" {
+		return nil, errors.New("postmark: server token not configured; use ServerTokenOpt when calling New")
+	}
 	return a.buildRequest(method, path, body, "X-Postmark-Server-Token", a.serverToken)
 }
 
