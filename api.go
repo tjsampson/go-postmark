@@ -6,11 +6,20 @@ package postmark
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"time"
+)
+
+// Header key constants used across newRequest and newServerRequest. Centralised
+// here so that any rename is a single-point change and the deletion in
+// newServerRequest can never silently become a no-op due to a typo.
+const (
+	headerAccountToken = "X-Postmark-Account-Token"
+	headerServerToken  = "X-Postmark-Server-Token"
 )
 
 type (
@@ -113,6 +122,26 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	}
 	req.Header.Set(headerAccountToken, a.token)
 
+	return req, nil
+}
+
+// newServerRequest builds an *http.Request for the given HTTP method and API
+// path, authenticated with the X-Postmark-Server-Token header required by the
+// Webhooks API and other server-scoped endpoints. It removes the
+// X-Postmark-Account-Token header that newRequest always sets and replaces it
+// with X-Postmark-Server-Token. Returns an error immediately if serverToken is
+// empty to prevent sending unauthenticated requests.
+func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	if a.serverToken == "" {
+		return nil, errors.New("serverToken is required; use ServerTokenOpt to configure it")
+	}
+	req, err := a.newRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	// Webhooks API requires the server token, not the account token.
+	req.Header.Del(headerAccountToken)
+	req.Header.Set(headerServerToken, a.serverToken)
 	return req, nil
 }
 

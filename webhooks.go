@@ -8,19 +8,19 @@ import (
 	"net/url"
 )
 
-// Header key constants shared between newRequest and newServerRequest so that
-// the deletion in newServerRequest is robust against typos and never silently
-// becomes a no-op if the key name changes in one place.
-const (
-	headerAccountToken = "X-Postmark-Account-Token"
-	headerServerToken  = "X-Postmark-Server-Token"
-)
-
 type (
 	// WebhookHTTPAuth holds the HTTP Basic Authentication credentials for a webhook.
+	//
+	// Security note: the Password field may contain a plaintext credential as
+	// returned by the Postmark API. Callers must not log, serialise, or expose
+	// WebhookHTTPAuth (or any struct that embeds it) in debug endpoints or
+	// structured log output without first redacting this field.
 	WebhookHTTPAuth struct {
 		Username string `json:"Username"`
-		Password string `json:"Password"`
+		// Password is omitted from JSON output when empty so that a zero-value
+		// WebhookHTTPAuth is not accidentally re-serialised with an empty password
+		// field. Callers must treat this value as a secret.
+		Password string `json:"Password,omitempty"`
 	}
 
 	// WebhookHeader represents a custom HTTP header sent with each webhook request.
@@ -101,26 +101,6 @@ type (
 		Webhooks []WebhookResp `json:"Webhooks"`
 	}
 )
-
-// newServerRequest builds an *http.Request for the given HTTP method and API
-// path, authenticated with the X-Postmark-Server-Token header required by the
-// Webhooks API. It removes the X-Postmark-Account-Token header (keyed by the
-// headerAccountToken constant) that newRequest always sets, and replaces it
-// with X-Postmark-Server-Token. Returns an error immediately if serverToken is
-// empty to prevent sending unauthenticated requests.
-func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
-	if a.serverToken == "" {
-		return nil, errors.New("serverToken is required; use ServerTokenOpt to configure it")
-	}
-	req, err := a.newRequest(method, path, body)
-	if err != nil {
-		return nil, err
-	}
-	// Webhooks API requires the server token, not the account token.
-	req.Header.Del(headerAccountToken)
-	req.Header.Set(headerServerToken, a.serverToken)
-	return req, nil
-}
 
 // ListWebhooks returns all webhooks configured for the given message stream.
 // Pass an empty string to retrieve webhooks across all message streams.
