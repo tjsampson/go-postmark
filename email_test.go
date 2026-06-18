@@ -499,23 +499,25 @@ func TestSendEmailBatch_MalformedResponse(t *testing.T) {
 	}
 }
 
+// TestSendEmailBatch_Empty verifies that an empty (non-nil) slice is treated
+// identically to a nil slice: it returns ([]SendEmailResp{}, nil) immediately,
+// without making a network request. Postmark rejects an empty batch array with
+// a 422 Unprocessable Entity, so there is nothing to send.
 func TestSendEmailBatch_Empty(t *testing.T) {
 	api := New(
 		ServerTokenOpt("srv-tok"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       jsonBody(t, []SendEmailResp{}),
-			}, nil
+			t.Error("HTTP request should not be made for an empty slice")
+			return nil, fmt.Errorf("should not reach transport")
 		})),
 	)
 
 	got, err := api.SendEmailBatch([]SendEmailReq{})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error for empty slice: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("expected 0 responses, got %d", len(got))
+	if got == nil || len(got) != 0 {
+		t.Errorf("expected empty non-nil slice, got %v", got)
 	}
 }
 
