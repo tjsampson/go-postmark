@@ -161,10 +161,10 @@ func TestSendEmailWithTemplate_TrackOpensFalse(t *testing.T) {
 	})))
 
 	_, err := api.SendEmailWithTemplate(&SendEmailWithTemplateReq{
-		TemplateID:  1,
-		From:        "sender@example.com",
-		To:          "recipient@example.com",
-		TrackOpens:  &trackOpens,
+		TemplateID: 1,
+		From:       "sender@example.com",
+		To:         "recipient@example.com",
+		TrackOpens: &trackOpens,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -236,6 +236,44 @@ func TestSendEmailBatchWithTemplates_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+}
+
+// TestSendEmailBatchWithTemplates_PerMessageErrorCodes verifies that per-message
+// error codes are preserved in the returned BatchEmailResp. The caller is
+// responsible for inspecting each element's ErrorCode; the method itself does
+// not surface per-message failures as a Go error.
+func TestSendEmailBatchWithTemplates_PerMessageErrorCodes(t *testing.T) {
+	envelope := batchWithTemplatesResp{Messages: []EmailResp{
+		{To: "ok@example.com", MessageID: "m1", ErrorCode: 0, Message: "OK"},
+		{To: "bad@example.com", ErrorCode: 406, Message: "Recipient inactive"},
+	}}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, envelope),
+		}, nil
+	})))
+
+	got, err := api.SendEmailBatchWithTemplates(&BatchWithTemplatesReq{
+		Messages: []SendEmailWithTemplateReq{
+			{TemplateID: 1, From: "s@example.com", To: "ok@example.com"},
+			{TemplateID: 1, From: "s@example.com", To: "bad@example.com"},
+		},
+	})
+	// No top-level error expected; per-message errors are in each element.
+	if err != nil {
+		t.Fatalf("unexpected top-level error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(got))
+	}
+	if got[0].ErrorCode != 0 {
+		t.Errorf("got[0].ErrorCode = %d, want 0", got[0].ErrorCode)
+	}
+	if got[1].ErrorCode != 406 {
+		t.Errorf("got[1].ErrorCode = %d, want 406", got[1].ErrorCode)
 	}
 }
 
@@ -318,6 +356,64 @@ func TestGetTemplate_NotFound(t *testing.T) {
 	}
 }
 
+// TestGetTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
+// but with a non-zero ErrorCode in the body, GetTemplate surfaces it as a Go error.
+func TestGetTemplate_InBodyErrorCode(t *testing.T) {
+	body := TemplateResp{
+		ErrorCode: 1101,
+		Message:   "Template not found",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.GetTemplate("9999")
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1101 {
+		t.Errorf("ErrorCode = %d, want 1101", pmErr.ErrorCode)
+	}
+}
+
+// TestGetTemplate_PathEscape verifies that a templateIDOrAlias containing
+// characters that would be unsafe in a URL path are properly percent-encoded,
+// preventing path traversal and malformed requests.
+func TestGetTemplate_PathEscape(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		// url.PathEscape encodes "/" as "%2F". Go's url.URL stores the decoded
+		// form in Path and the original percent-encoded form in RawPath.
+		// EscapedPath() returns RawPath when it differs from Path, which is
+		// what net/http uses to build the actual wire request URI.
+		escaped := req.URL.EscapedPath()
+		if strings.Contains(escaped, "../") {
+			t.Errorf("path traversal not escaped in EscapedPath: %s", escaped)
+		}
+		if !strings.HasSuffix(escaped, "/templates/..%2Fmessages") {
+			t.Errorf("unexpected EscapedPath (expected percent-encoding): %s", escaped)
+		}
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       jsonBody(t, PostmarkErr{ErrorCode: 1101, Message: "Template not found"}),
+		}, nil
+	})))
+
+	_, err := api.GetTemplate("../messages")
+	// We expect an error (404 -> ErrNotFound); the important assertion is that
+	// the path was escaped, which is verified in the transport above.
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
 // ---- CreateTemplate ------------------------------------------------------------
 
 func TestCreateTemplate_Success(t *testing.T) {
@@ -374,6 +470,37 @@ func TestCreateTemplate_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
+	}
+}
+
+// TestCreateTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
+// but with a non-zero ErrorCode in the body, CreateTemplate surfaces it as a Go error.
+func TestCreateTemplate_InBodyErrorCode(t *testing.T) {
+	body := TemplateResp{
+		ErrorCode: 1105,
+		Message:   "Template alias already in use",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.CreateTemplate(&CreateTemplateReq{
+		Name:  "Duplicate",
+		Alias: "existing-alias",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1105 {
+		t.Errorf("ErrorCode = %d, want 1105", pmErr.ErrorCode)
 	}
 }
 
@@ -444,6 +571,34 @@ func TestUpdateTemplate_APIError(t *testing.T) {
 	}
 }
 
+// TestUpdateTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
+// but with a non-zero ErrorCode in the body, UpdateTemplate surfaces it as a Go error.
+func TestUpdateTemplate_InBodyErrorCode(t *testing.T) {
+	body := TemplateResp{
+		ErrorCode: 1101,
+		Message:   "Template not found",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.UpdateTemplate("9999", &UpdateTemplateReq{Name: "Ghost"})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1101 {
+		t.Errorf("ErrorCode = %d, want 1101", pmErr.ErrorCode)
+	}
+}
+
 // ---- ListTemplates -------------------------------------------------------------
 
 func TestListTemplates_Success(t *testing.T) {
@@ -459,6 +614,13 @@ func TestListTemplates_Success(t *testing.T) {
 	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
+		}
+		// Query params must appear in RawQuery, not encoded into the path.
+		if req.URL.RawQuery == "" {
+			t.Errorf("expected query string, got empty RawQuery; path=%s", req.URL.Path)
+		}
+		if strings.Contains(req.URL.Path, "?") {
+			t.Errorf("query string must not be embedded in path: %s", req.URL.Path)
 		}
 		if !strings.Contains(req.URL.RawQuery, "Count=10") {
 			t.Errorf("expected Count param, query=%s", req.URL.RawQuery)
@@ -591,5 +753,33 @@ func TestDeleteTemplate_ByAlias(t *testing.T) {
 	}
 	if got.ErrorCode != 0 {
 		t.Errorf("ErrorCode = %d, want 0", got.ErrorCode)
+	}
+}
+
+// TestDeleteTemplate_InBodyErrorCode verifies that when Postmark returns HTTP 200
+// but with a non-zero ErrorCode in the body, DeleteTemplate surfaces it as a Go error.
+func TestDeleteTemplate_InBodyErrorCode(t *testing.T) {
+	body := DeleteTemplateResp{
+		ErrorCode: 1101,
+		Message:   "Template not found",
+	}
+
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, body),
+		}, nil
+	})))
+
+	_, err := api.DeleteTemplate("9999")
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 body, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1101 {
+		t.Errorf("ErrorCode = %d, want 1101", pmErr.ErrorCode)
 	}
 }
