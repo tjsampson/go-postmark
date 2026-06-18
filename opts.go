@@ -27,5 +27,8 @@ func APITokenOpt(token string) Option {
 func TimeoutOpt(timeout time.Duration) Option {
 	return func(api *API) {
 		api.timeout = timeout
+		if hc, ok := api.client.(*http.Client); ok {
+			hc.Timeout = timeout
+		}
 	}
 }
