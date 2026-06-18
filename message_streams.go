@@ -60,21 +60,6 @@ type (
 	}
 )
 
-// newServerRequest builds an *http.Request for the given HTTP method and API path,
-// using X-Postmark-Server-Token instead of X-Postmark-Account-Token.
-// If body is non-nil it is JSON-encoded as the request body and Content-Type
-// is set to application/json.
-func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
-	req, err := a.newRequest(method, path, body)
-	if err != nil {
-		return nil, err
-	}
-	// Replace account token header with server token header.
-	req.Header.Del("X-Postmark-Account-Token")
-	req.Header.Set("X-Postmark-Server-Token", a.token)
-	return req, nil
-}
-
 // ListMessageStreams returns a list of message streams, optionally filtered by
 // streamType ("Transactional", "Inbound", "Broadcasts", or "" for all) and
 // whether to include archived streams.
