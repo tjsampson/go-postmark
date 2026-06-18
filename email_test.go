@@ -1,0 +1,385 @@
+package postmark
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// ---- SendEmail -----------------------------------------------------------------
+
+func TestSendEmail_Success(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     *EmailReq
+		want    EmailResp
+	}{
+		{
+			name: "plain text email",
+			req: &EmailReq{
+				From:     "sender@example.com",
+				To:       "recipient@example.com",
+				Subject:  "Hello",
+				TextBody: "Hello, world!",
+			},
+			want: EmailResp{
+				To:          "recipient@example.com",
+				SubmittedAt: "2024-01-01T00:00:00Z",
+				MessageID:   "abc-123",
+				ErrorCode:   0,
+				Message:     "OK",
+			},
+		},
+		{
+			name: "html email with attachments",
+			req: &EmailReq{
+				From:     "sender@example.com",
+				To:       "recipient@example.com",
+				Subject:  "HTML Email",
+				HtmlBody: "<h1>Hello</h1>",
+				Attachments: []Attachment{
+					{Name: "file.txt", Content: "aGVsbG8=", ContentType: "text/plain"},
+				},
+			},
+			want: EmailResp{
+				To:          "recipient@example.com",
+				SubmittedAt: "2024-01-01T00:00:00Z",
+				MessageID:   "def-456",
+				ErrorCode:   0,
+				Message:     "OK",
+			},
+		},
+		{
+			name: "email with metadata and headers",
+			req: &EmailReq{
+				From:     "sender@example.com",
+				To:       "recipient@example.com",
+				Subject:  "Rich Email",
+				TextBody: "Body",
+				Headers: []Header{
+					{Name: "X-Custom", Value: "custom-value"},
+				},
+				Metadata: map[string]string{"key": "value"},
+			},
+			want: EmailResp{
+				To:          "recipient@example.com",
+				SubmittedAt: "2024-01-02T00:00:00Z",
+				MessageID:   "ghi-789",
+				ErrorCode:   0,
+				Message:     "OK",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					// Verify method and path.
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email") || strings.HasSuffix(req.URL.Path, "/email/batch") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					// Verify server token header is set (not account token).
+					if req.Header.Get("X-Postmark-Server-Token") != "test-server-token" {
+						t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+					}
+					if req.Header.Get("X-Postmark-Account-Token") != "" {
+						t.Errorf("unexpected X-Postmark-Account-Token header on email request")
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.want),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendEmail(tc.req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.To != tc.want.To {
+				t.Errorf("To = %q, want %q", got.To, tc.want.To)
+			}
+			if got.MessageID != tc.want.MessageID {
+				t.Errorf("MessageID = %q, want %q", got.MessageID, tc.want.MessageID)
+			}
+			if got.ErrorCode != tc.want.ErrorCode {
+				t.Errorf("ErrorCode = %d, want %d", got.ErrorCode, tc.want.ErrorCode)
+			}
+			if got.Message != tc.want.Message {
+				t.Errorf("Message = %q, want %q", got.Message, tc.want.Message)
+			}
+		})
+	}
+}
+
+func TestSendEmail_APIError(t *testing.T) {
+	tests := []struct {
+		name           string
+		statusCode     int
+		responseBody   interface{}
+		wantErrIs      error
+		wantErrContain string
+	}{
+		{
+			name:       "internal server error",
+			statusCode: http.StatusInternalServerError,
+			responseBody: PostmarkErr{
+				ErrorCode: 500,
+				Message:   "Internal server error",
+			},
+			wantErrContain: "Internal server error",
+		},
+		{
+			name:       "unauthorized",
+			statusCode: http.StatusUnauthorized,
+			responseBody: PostmarkErr{
+				ErrorCode: 401,
+				Message:   "Unauthorized: Missing or incorrect API token",
+			},
+			wantErrContain: "Unauthorized",
+		},
+		{
+			name:       "not found",
+			statusCode: http.StatusNotFound,
+			responseBody: PostmarkErr{
+				ErrorCode: 404,
+				Message:   "Not found",
+			},
+			wantErrIs: ErrNotFound,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: tc.statusCode,
+						Body:       jsonBody(t, tc.responseBody),
+					}, nil
+				})),
+			)
+
+			_, err := api.SendEmail(&EmailReq{
+				From:    "sender@example.com",
+				To:      "recipient@example.com",
+				Subject: "Test",
+			})
+
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("expected errors.Is(err, %v) to be true, got err=%v", tc.wantErrIs, err)
+			}
+			if tc.wantErrContain != "" && !strings.Contains(err.Error(), tc.wantErrContain) {
+				t.Errorf("expected error to contain %q, got %q", tc.wantErrContain, err.Error())
+			}
+		})
+	}
+}
+
+// ---- SendEmailBatch ------------------------------------------------------------
+
+func TestSendEmailBatch_Success(t *testing.T) {
+	tests := []struct {
+		name string
+		reqs []*EmailReq
+		want BatchEmailResp
+	}{
+		{
+			name: "single message batch",
+			reqs: []*EmailReq{
+				{
+					From:     "sender@example.com",
+					To:       "recipient@example.com",
+					Subject:  "Hello",
+					TextBody: "Hello, world!",
+				},
+			},
+			want: BatchEmailResp{
+				{
+					To:          "recipient@example.com",
+					SubmittedAt: "2024-01-01T00:00:00Z",
+					MessageID:   "batch-msg-1",
+					ErrorCode:   0,
+					Message:     "OK",
+				},
+			},
+		},
+		{
+			name: "multiple messages batch",
+			reqs: []*EmailReq{
+				{From: "a@example.com", To: "b@example.com", Subject: "Msg 1", TextBody: "Body 1"},
+				{From: "a@example.com", To: "c@example.com", Subject: "Msg 2", TextBody: "Body 2"},
+				{From: "a@example.com", To: "d@example.com", Subject: "Msg 3", HtmlBody: "<p>Body 3</p>"},
+			},
+			want: BatchEmailResp{
+				{To: "b@example.com", MessageID: "batch-1", ErrorCode: 0, Message: "OK"},
+				{To: "c@example.com", MessageID: "batch-2", ErrorCode: 0, Message: "OK"},
+				{To: "d@example.com", MessageID: "batch-3", ErrorCode: 0, Message: "OK"},
+			},
+		},
+		{
+			name: "empty batch",
+			reqs: []*EmailReq{},
+			want: BatchEmailResp{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					// Verify method and path.
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email/batch") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					// Verify server token header.
+					if req.Header.Get("X-Postmark-Server-Token") != "test-server-token" {
+						t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+					}
+					if req.Header.Get("X-Postmark-Account-Token") != "" {
+						t.Errorf("unexpected X-Postmark-Account-Token header on batch email request")
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.want),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendEmailBatch(tc.reqs)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("batch response length = %d, want %d", len(got), len(tc.want))
+			}
+			for i, item := range got {
+				if item.To != tc.want[i].To {
+					t.Errorf("[%d] To = %q, want %q", i, item.To, tc.want[i].To)
+				}
+				if item.MessageID != tc.want[i].MessageID {
+					t.Errorf("[%d] MessageID = %q, want %q", i, item.MessageID, tc.want[i].MessageID)
+				}
+				if item.ErrorCode != tc.want[i].ErrorCode {
+					t.Errorf("[%d] ErrorCode = %d, want %d", i, item.ErrorCode, tc.want[i].ErrorCode)
+				}
+			}
+		})
+	}
+}
+
+func TestSendEmailBatch_APIError(t *testing.T) {
+	tests := []struct {
+		name           string
+		statusCode     int
+		responseBody   interface{}
+		wantErrIs      error
+		wantErrContain string
+	}{
+		{
+			name:       "internal server error",
+			statusCode: http.StatusInternalServerError,
+			responseBody: PostmarkErr{
+				ErrorCode: 500,
+				Message:   "Internal server error",
+			},
+			wantErrContain: "Internal server error",
+		},
+		{
+			name:       "not found",
+			statusCode: http.StatusNotFound,
+			responseBody: PostmarkErr{
+				ErrorCode: 404,
+				Message:   "Not found",
+			},
+			wantErrIs: ErrNotFound,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: tc.statusCode,
+						Body:       jsonBody(t, tc.responseBody),
+					}, nil
+				})),
+			)
+
+			_, err := api.SendEmailBatch([]*EmailReq{
+				{From: "a@example.com", To: "b@example.com", Subject: "Test"},
+			})
+
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("expected errors.Is(err, %v) to be true, got err=%v", tc.wantErrIs, err)
+			}
+			if tc.wantErrContain != "" && !strings.Contains(err.Error(), tc.wantErrContain) {
+				t.Errorf("expected error to contain %q, got %q", tc.wantErrContain, err.Error())
+			}
+		})
+	}
+}
+
+// ---- ServerTokenOpt ------------------------------------------------------------
+
+func TestNew_WithServerTokenOpt(t *testing.T) {
+	api := New(ServerTokenOpt("srv-token-xyz"))
+	if api.serverToken != "srv-token-xyz" {
+		t.Errorf("expected serverToken srv-token-xyz, got %s", api.serverToken)
+	}
+}
+
+// TestNewServerRequest_UsesServerToken verifies that newServerRequest sets
+// X-Postmark-Server-Token and does not set X-Postmark-Account-Token.
+func TestNewServerRequest_UsesServerToken(t *testing.T) {
+	api := New(ServerTokenOpt("my-server-token"), APITokenOpt("my-account-token"))
+
+	req, err := api.newServerRequest(http.MethodPost, "email", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := req.Header.Get("X-Postmark-Server-Token"); got != "my-server-token" {
+		t.Errorf("X-Postmark-Server-Token = %q, want %q", got, "my-server-token")
+	}
+	if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
+		t.Errorf("X-Postmark-Account-Token should not be set, got %q", got)
+	}
+}
+
+// TestNewRequest_UsesAccountToken verifies that the existing newRequest helper
+// still uses X-Postmark-Account-Token (unchanged behaviour).
+func TestNewRequest_UsesAccountToken(t *testing.T) {
+	api := New(APITokenOpt("my-account-token"), ServerTokenOpt("my-server-token"))
+
+	req, err := api.newRequest(http.MethodGet, "servers/1", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := req.Header.Get("X-Postmark-Account-Token"); got != "my-account-token" {
+		t.Errorf("X-Postmark-Account-Token = %q, want %q", got, "my-account-token")
+	}
+	if got := req.Header.Get("X-Postmark-Server-Token"); got != "" {
+		t.Errorf("X-Postmark-Server-Token should not be set on account request, got %q", got)
+	}
+}

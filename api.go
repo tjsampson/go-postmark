@@ -23,11 +23,12 @@ type (
 	// API is the main client for the Postmark API.
 	// Create one with New() and supply functional options to configure it.
 	API struct {
-		client     Doer
-		timeout    time.Duration
-		baseHost   string
-		token      string
-		timeoutSet bool // true when TimeoutOpt was explicitly supplied
+		client      Doer
+		timeout     time.Duration
+		baseHost    string
+		token       string
+		serverToken string
+		timeoutSet  bool // true when TimeoutOpt was explicitly supplied
 	}
 
 	// Req holds the URI and optional JSON body string for an outgoing request.
@@ -84,6 +85,7 @@ func New(options ...Option) *API {
 // If body is non-nil it is JSON-encoded as the request body and Content-Type
 // is set to application/json. If body is nil, http.NoBody is used and no
 // Content-Type header is set.
+// The request is authenticated with the X-Postmark-Account-Token header.
 func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
 	var reqBody io.Reader = http.NoBody
 	hasBody := body != nil
@@ -108,6 +110,39 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Postmark-Account-Token", a.token)
+
+	return req, nil
+}
+
+// newServerRequest builds an *http.Request for the given HTTP method and API path,
+// authenticated with X-Postmark-Server-Token instead of X-Postmark-Account-Token.
+// This is required for email-sending endpoints which operate at the server level.
+// If body is non-nil it is JSON-encoded as the request body and Content-Type
+// is set to application/json.
+func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
+	var reqBody io.Reader = http.NoBody
+	hasBody := body != nil
+	if hasBody {
+		reqPayload, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(reqPayload)
+	}
+
+	req, err := http.NewRequest(
+		method,
+		fmt.Sprintf("%s/%s", a.baseHost, path),
+		reqBody)
+
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if hasBody {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Postmark-Server-Token", a.serverToken)
 
 	return req, nil
 }

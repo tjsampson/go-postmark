@@ -22,6 +22,16 @@ func APITokenOpt(token string) Option {
 	}
 }
 
+// ServerTokenOpt returns an Option that sets the Postmark server token
+// used in the X-Postmark-Server-Token request header. This token is required
+// for email-sending endpoints (POST /email and POST /email/batch) which
+// operate at the server level rather than the account level.
+func ServerTokenOpt(token string) Option {
+	return func(api *API) {
+		api.serverToken = token
+	}
+}
+
 // TimeoutOpt returns an Option that overrides the default 10-second HTTP
 // request timeout. The timeout is reconciled with the underlying *http.Client
 // (if any) in New() after all options have been applied, so option order does
