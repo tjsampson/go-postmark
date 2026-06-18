@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
@@ -42,12 +43,15 @@ type (
 		Subject string `json:"Subject,omitempty"`
 		// TextBody is the plain-text body of the email.
 		TextBody string `json:"TextBody,omitempty"`
-		// HtmlBody is the HTML body of the email.
-		HtmlBody string `json:"HtmlBody,omitempty"`
+		// HTMLBody is the HTML body of the email.
+		HTMLBody string `json:"HtmlBody,omitempty"`
 		// Tag is an optional tag for categorising the email in Postmark.
 		Tag string `json:"Tag,omitempty"`
-		// TrackOpens enables open tracking for the email.
-		TrackOpens bool `json:"TrackOpens,omitempty"`
+		// TrackOpens controls open tracking for the email. A nil value omits the
+		// field from the request, deferring to the server default. Set to a pointer
+		// to true or false to explicitly enable or disable tracking, so that an
+		// explicit false is not silently dropped by JSON omitempty.
+		TrackOpens *bool `json:"TrackOpens,omitempty"`
 		// TrackLinks controls link tracking ("None", "HtmlAndText", "HtmlOnly", "TextOnly").
 		TrackLinks string `json:"TrackLinks,omitempty"`
 		// MessageStream is the message stream to use (e.g. "outbound").
@@ -79,6 +83,10 @@ type (
 	BatchEmailResp []EmailResp
 )
 
+// maxBatchSize is the maximum number of messages accepted by the Postmark
+// batch-send endpoint in a single request.
+const maxBatchSize = 500
+
 // SendEmail sends a single email via the Postmark API (POST /email).
 // It uses the server token (X-Postmark-Server-Token) for authentication.
 func (a *API) SendEmail(req *EmailReq) (*EmailResp, error) {
@@ -99,10 +107,16 @@ func (a *API) SendEmail(req *EmailReq) (*EmailResp, error) {
 	return &data, nil
 }
 
-// SendEmailBatch sends a batch of up to 500 emails via the Postmark API (POST /email/batch).
-// It uses the server token (X-Postmark-Server-Token) for authentication.
-// Each element in the returned BatchEmailResp corresponds to one email in the request slice.
+// SendEmailBatch sends a batch of up to 500 emails via the Postmark API
+// (POST /email/batch). It returns an error immediately if more than 500
+// messages are supplied, matching the Postmark API limit.
+// Each element in the returned BatchEmailResp corresponds to one email in
+// the request slice.
 func (a *API) SendEmailBatch(reqs []*EmailReq) (BatchEmailResp, error) {
+	if len(reqs) > maxBatchSize {
+		return nil, errors.New("postmark: batch size exceeds 500")
+	}
+
 	httpReq, err := a.newServerRequest(http.MethodPost, "email/batch", reqs)
 	if err != nil {
 		return nil, err

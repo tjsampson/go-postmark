@@ -81,12 +81,13 @@ func New(options ...Option) *API {
 	return api
 }
 
-// newRequest builds an *http.Request for the given HTTP method and API path.
-// If body is non-nil it is JSON-encoded as the request body and Content-Type
-// is set to application/json. If body is nil, http.NoBody is used and no
-// Content-Type header is set.
-// The request is authenticated with the X-Postmark-Account-Token header.
-func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
+// buildRequest is the shared low-level helper used by newRequest and
+// newServerRequest. It constructs an *http.Request for the given HTTP method
+// and API path, JSON-encodes body when non-nil, and sets the Accept,
+// Content-Type, and auth headers. authHeader and authValue specify which
+// Postmark token header to use (e.g. "X-Postmark-Account-Token" or
+// "X-Postmark-Server-Token").
+func (a *API) buildRequest(method, path string, body interface{}, authHeader, authValue string) (*http.Request, error) {
 	var reqBody io.Reader = http.NoBody
 	hasBody := body != nil
 	if hasBody {
@@ -109,42 +110,27 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Postmark-Account-Token", a.token)
+	req.Header.Set(authHeader, authValue)
 
 	return req, nil
 }
 
-// newServerRequest builds an *http.Request for the given HTTP method and API path,
-// authenticated with X-Postmark-Server-Token instead of X-Postmark-Account-Token.
-// This is required for email-sending endpoints which operate at the server level.
+// newRequest builds an *http.Request for the given HTTP method and API path,
+// authenticated with the X-Postmark-Account-Token header.
 // If body is non-nil it is JSON-encoded as the request body and Content-Type
-// is set to application/json.
+// is set to application/json. If body is nil, http.NoBody is used and no
+// Content-Type header is set.
+func (a *API) newRequest(method, path string, body interface{}) (*http.Request, error) {
+	return a.buildRequest(method, path, body, "X-Postmark-Account-Token", a.token)
+}
+
+// newServerRequest builds an *http.Request for the given HTTP method and API path,
+// authenticated with the X-Postmark-Server-Token header instead of
+// X-Postmark-Account-Token. This is required for email-sending endpoints which
+// operate at the server level. If body is non-nil it is JSON-encoded as the
+// request body and Content-Type is set to application/json.
 func (a *API) newServerRequest(method, path string, body interface{}) (*http.Request, error) {
-	var reqBody io.Reader = http.NoBody
-	hasBody := body != nil
-	if hasBody {
-		reqPayload, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		reqBody = bytes.NewReader(reqPayload)
-	}
-
-	req, err := http.NewRequest(
-		method,
-		fmt.Sprintf("%s/%s", a.baseHost, path),
-		reqBody)
-
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	if hasBody {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("X-Postmark-Server-Token", a.serverToken)
-
-	return req, nil
+	return a.buildRequest(method, path, body, "X-Postmark-Server-Token", a.serverToken)
 }
 
 // Do executes an HTTP request and returns the wrapped response.

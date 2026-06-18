@@ -7,13 +7,16 @@ import (
 	"testing"
 )
 
+// boolPtr is a test helper that returns a pointer to a bool value.
+func boolPtr(b bool) *bool { return &b }
+
 // ---- SendEmail -----------------------------------------------------------------
 
 func TestSendEmail_Success(t *testing.T) {
 	tests := []struct {
-		name    string
-		req     *EmailReq
-		want    EmailResp
+		name string
+		req  *EmailReq
+		want EmailResp
 	}{
 		{
 			name: "plain text email",
@@ -37,7 +40,7 @@ func TestSendEmail_Success(t *testing.T) {
 				From:     "sender@example.com",
 				To:       "recipient@example.com",
 				Subject:  "HTML Email",
-				HtmlBody: "<h1>Hello</h1>",
+				HTMLBody: "<h1>Hello</h1>",
 				Attachments: []Attachment{
 					{Name: "file.txt", Content: "aGVsbG8=", ContentType: "text/plain"},
 				},
@@ -70,6 +73,22 @@ func TestSendEmail_Success(t *testing.T) {
 				Message:     "OK",
 			},
 		},
+		{
+			name: "email with explicit TrackOpens false",
+			req: &EmailReq{
+				From:       "sender@example.com",
+				To:         "recipient@example.com",
+				Subject:    "No tracking",
+				TextBody:   "Body",
+				TrackOpens: boolPtr(false),
+			},
+			want: EmailResp{
+				To:        "recipient@example.com",
+				MessageID: "jkl-012",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -81,6 +100,7 @@ func TestSendEmail_Success(t *testing.T) {
 					if req.Method != http.MethodPost {
 						t.Errorf("expected POST, got %s", req.Method)
 					}
+					// Path must end with /email AND must NOT end with /email/batch.
 					if !strings.HasSuffix(req.URL.Path, "/email") || strings.HasSuffix(req.URL.Path, "/email/batch") {
 						t.Errorf("unexpected path: %s", req.URL.Path)
 					}
@@ -219,7 +239,7 @@ func TestSendEmailBatch_Success(t *testing.T) {
 			reqs: []*EmailReq{
 				{From: "a@example.com", To: "b@example.com", Subject: "Msg 1", TextBody: "Body 1"},
 				{From: "a@example.com", To: "c@example.com", Subject: "Msg 2", TextBody: "Body 2"},
-				{From: "a@example.com", To: "d@example.com", Subject: "Msg 3", HtmlBody: "<p>Body 3</p>"},
+				{From: "a@example.com", To: "d@example.com", Subject: "Msg 3", HTMLBody: "<p>Body 3</p>"},
 			},
 			want: BatchEmailResp{
 				{To: "b@example.com", MessageID: "batch-1", ErrorCode: 0, Message: "OK"},
@@ -282,6 +302,34 @@ func TestSendEmailBatch_Success(t *testing.T) {
 	}
 }
 
+// TestSendEmailBatch_ExceedsMaxSize asserts that SendEmailBatch returns an
+// error immediately when more than 500 messages are supplied, without making
+// any HTTP request.
+func TestSendEmailBatch_ExceedsMaxSize(t *testing.T) {
+	// Build a slice of 501 minimal EmailReq values.
+	reqs := make([]*EmailReq, 501)
+	for i := range reqs {
+		reqs[i] = &EmailReq{From: "a@example.com", To: "b@example.com", Subject: "Test"}
+	}
+
+	// The mock transport must never be called; if it is, fail loudly.
+	api := New(
+		ServerTokenOpt("test-server-token"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called when batch size exceeds 500")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.SendEmailBatch(reqs)
+	if err == nil {
+		t.Fatal("expected an error for batch size > 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "batch size exceeds 500") {
+		t.Errorf("expected error message to mention batch size limit, got: %v", err)
+	}
+}
+
 func TestSendEmailBatch_APIError(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -334,6 +382,71 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 			}
 			if tc.wantErrContain != "" && !strings.Contains(err.Error(), tc.wantErrContain) {
 				t.Errorf("expected error to contain %q, got %q", tc.wantErrContain, err.Error())
+			}
+		})
+	}
+}
+
+// ---- TrackOpens serialisation --------------------------------------------------
+
+// TestTrackOpens_Serialisation verifies that an explicit false value for
+// TrackOpens is serialised into the JSON request body (i.e. not silently
+// dropped by omitempty), and that a nil value omits the field entirely.
+func TestTrackOpens_Serialisation(t *testing.T) {
+	tests := []struct {
+		name        string
+		trackOpens  *bool
+		wantInBody  string
+		wantAbsent  string
+	}{
+		{
+			name:       "explicit false is serialised",
+			trackOpens: boolPtr(false),
+			wantInBody: `"TrackOpens":false`,
+		},
+		{
+			name:       "explicit true is serialised",
+			trackOpens: boolPtr(true),
+			wantInBody: `"TrackOpens":true`,
+		},
+		{
+			name:       "nil omits field",
+			trackOpens: nil,
+			wantAbsent: `"TrackOpens"`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("test-server-token"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					// Read and inspect the serialised request body.
+					body := make([]byte, 4096)
+					n, _ := req.Body.Read(body)
+					bodyStr := string(body[:n])
+
+					if tc.wantInBody != "" && !strings.Contains(bodyStr, tc.wantInBody) {
+						t.Errorf("expected body to contain %q, got: %s", tc.wantInBody, bodyStr)
+					}
+					if tc.wantAbsent != "" && strings.Contains(bodyStr, tc.wantAbsent) {
+						t.Errorf("expected body NOT to contain %q, got: %s", tc.wantAbsent, bodyStr)
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, EmailResp{To: "b@example.com", Message: "OK"}),
+					}, nil
+				})),
+			)
+
+			_, err := api.SendEmail(&EmailReq{
+				From:       "a@example.com",
+				To:         "b@example.com",
+				Subject:    "Test",
+				TrackOpens: tc.trackOpens,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}
