@@ -1,6 +1,8 @@
 package postmark
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,7 +19,7 @@ func TestListDomains_Success(t *testing.T) {
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -29,6 +31,9 @@ func TestListDomains_Success(t *testing.T) {
 		}
 		if !strings.Contains(req.URL.RawQuery, "offset=0") {
 			t.Errorf("expected offset param, query=%s", req.URL.RawQuery)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -67,12 +72,15 @@ func TestListDomains_APIError(t *testing.T) {
 func TestGetDomain_Success(t *testing.T) {
 	want := DomainResp{ID: 42, Name: "example.com", DKIMVerified: true}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.Contains(req.URL.Path, "/domains/42") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -111,12 +119,27 @@ func TestGetDomain_NotFound(t *testing.T) {
 func TestCreateDomain_Success(t *testing.T) {
 	want := DomainResp{ID: 10, Name: "newdomain.com"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/domains") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
+		}
+		// Verify the request body contains the expected fields.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		var sent CreateDomainReq
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if sent.Name != "newdomain.com" {
+			t.Errorf("request body Name = %q, want newdomain.com", sent.Name)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -155,12 +178,27 @@ func TestCreateDomain_APIError(t *testing.T) {
 func TestEditDomain_Success(t *testing.T) {
 	want := DomainResp{ID: 7, Name: "example.com", ReturnPathDomain: "pm-bounces.example.com"}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
 			t.Errorf("expected PUT, got %s", req.Method)
 		}
 		if !strings.Contains(req.URL.Path, "/domains/7") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
+		}
+		// Verify the request body contains the expected fields.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		var sent EditDomainReq
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if sent.ReturnPathDomain != "pm-bounces.example.com" {
+			t.Errorf("request body ReturnPathDomain = %q, want pm-bounces.example.com", sent.ReturnPathDomain)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

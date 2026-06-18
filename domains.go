@@ -66,16 +66,18 @@ type DomainResp = DomainDetails
 // ListDomains returns a paginated list of domains on the account.
 // count controls the page size and offset controls the starting position.
 func (a *API) ListDomains(count, offset int) (*ListDomainsResp, error) {
-	params := url.Values{}
-	params.Set("count", strconv.Itoa(count))
-	params.Set("offset", strconv.Itoa(offset))
-	req, err := a.newRequest(http.MethodGet, "domains?"+params.Encode(), nil)
+	req, err := a.newRequest(http.MethodGet, "domains", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	params := url.Values{}
+	params.Set("count", strconv.Itoa(count))
+	params.Set("offset", strconv.Itoa(offset))
+	req.URL.RawQuery = params.Encode()
+
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ListDomainsResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -90,9 +92,9 @@ func (a *API) GetDomain(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -107,9 +109,9 @@ func (a *API) CreateDomain(domainReq *CreateDomainReq) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -124,9 +126,9 @@ func (a *API) EditDomain(domainID int, editReq *EditDomainReq) (*DomainResp, err
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -141,9 +143,9 @@ func (a *API) DeleteDomain(domainID int) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -158,9 +160,9 @@ func (a *API) VerifyDomainDKIM(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -175,9 +177,9 @@ func (a *API) VerifyDomainReturnPath(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -192,9 +194,9 @@ func (a *API) RotateDomainDKIM(domainID int) (*DomainResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DomainResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

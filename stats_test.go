@@ -15,21 +15,25 @@ func TestGetOutboundOverview_Success(t *testing.T) {
 		Opens:   80,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
 		}
-		if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
-			t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
+		}
+		// Stats endpoints must NOT send the account token header.
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
+			t.Errorf("unexpected X-Postmark-Account-Token header = %q on stats endpoint", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       jsonBody(t, want),
 		}, nil
-	})), ServerTokenOpt("srv-tok"))
+	})))
 
 	got, err := api.GetOutboundOverview(nil)
 	if err != nil {
@@ -40,6 +44,25 @@ func TestGetOutboundOverview_Success(t *testing.T) {
 	}
 	if got.Bounced != 5 {
 		t.Errorf("Bounced = %d, want 5", got.Bounced)
+	}
+}
+
+// TestGetOutboundOverview_NilParams verifies that passing nil for StatsParams
+// does not panic and produces a request with no query string.
+func TestGetOutboundOverview_NilParams(t *testing.T) {
+	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		if req.URL.RawQuery != "" {
+			t.Errorf("expected empty query string for nil params, got %q", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       jsonBody(t, OutboundOverviewResp{}),
+		}, nil
+	})))
+
+	_, err := api.GetOutboundOverview(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -100,12 +123,15 @@ func TestGetSentCounts_Success(t *testing.T) {
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound/sends") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -151,12 +177,15 @@ func TestGetBounceCounts_Success(t *testing.T) {
 		SoftBounce: 7,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound/bounces") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -198,12 +227,15 @@ func TestGetSpamComplaints_Success(t *testing.T) {
 		SpamComplaintsRate: 0.03,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound/spam") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -229,12 +261,15 @@ func TestGetClickCounts_Success(t *testing.T) {
 		WithLinkTracking:   200,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound/clicks") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -287,12 +322,15 @@ func TestGetEmailOpenCounts_Success(t *testing.T) {
 		Tracked:     600,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("srv-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/stats/outbound/opens") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != "srv-tok" {
+			t.Errorf("X-Postmark-Server-Token = %q, want srv-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

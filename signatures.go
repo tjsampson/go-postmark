@@ -47,8 +47,8 @@ type (
 
 	// ListSignaturesResp is the response envelope returned by the list-senders endpoint.
 	ListSignaturesResp struct {
-		TotalCount       int                  `json:"TotalCount"`
-		SenderSignatures []SignatureListEntry  `json:"SenderSignatures"`
+		TotalCount       int                 `json:"TotalCount"`
+		SenderSignatures []SignatureListEntry `json:"SenderSignatures"`
 	}
 
 	// CreateSignatureReq is the request body for creating a new sender signature.
@@ -84,16 +84,18 @@ type SignatureResp = SignatureDetails
 // ListSignatures returns a paginated list of sender signatures on the account.
 // count controls the page size and offset controls the starting position.
 func (a *API) ListSignatures(count, offset int) (*ListSignaturesResp, error) {
-	params := url.Values{}
-	params.Set("count", strconv.Itoa(count))
-	params.Set("offset", strconv.Itoa(offset))
-	req, err := a.newRequest(http.MethodGet, "senders?"+params.Encode(), nil)
+	req, err := a.newRequest(http.MethodGet, "senders", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	params := url.Values{}
+	params.Set("count", strconv.Itoa(count))
+	params.Set("offset", strconv.Itoa(offset))
+	req.URL.RawQuery = params.Encode()
+
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ListSignaturesResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -108,9 +110,9 @@ func (a *API) GetSignature(sigID int) (*SignatureResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data SignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -125,9 +127,9 @@ func (a *API) CreateSignature(sigReq *CreateSignatureReq) (*SignatureResp, error
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data SignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -142,9 +144,9 @@ func (a *API) EditSignature(sigID int, editReq *EditSignatureReq) (*SignatureRes
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data SignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -159,9 +161,9 @@ func (a *API) DeleteSignature(sigID int) (*DeleteResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data DeleteResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -177,9 +179,9 @@ func (a *API) ResendSignatureConfirmation(sigID int) (*ResendResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data ResendResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {
@@ -194,9 +196,9 @@ func (a *API) RotateSignatureDKIM(sigID int) (*SignatureResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, e := a.Do(req)
-	if e != nil {
-		return nil, e
+	resp, err := a.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	var data SignatureResp
 	if err = json.Unmarshal(resp.rawBody, &data); err != nil {

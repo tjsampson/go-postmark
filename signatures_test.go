@@ -1,6 +1,8 @@
 package postmark
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,7 +19,7 @@ func TestListSignatures_Success(t *testing.T) {
 		},
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -29,6 +31,9 @@ func TestListSignatures_Success(t *testing.T) {
 		}
 		if !strings.Contains(req.URL.RawQuery, "offset=0") {
 			t.Errorf("expected offset param, query=%s", req.URL.RawQuery)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -72,12 +77,15 @@ func TestGetSignature_Success(t *testing.T) {
 		Confirmed:    true,
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
 		if !strings.Contains(req.URL.Path, "/senders/42") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -120,12 +128,30 @@ func TestCreateSignature_Success(t *testing.T) {
 		Name:         "New Sender",
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", req.Method)
 		}
 		if !strings.HasSuffix(req.URL.Path, "/senders") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
+		}
+		// Verify the request body contains the expected fields.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		var sent CreateSignatureReq
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if sent.FromEmail != "new@example.com" {
+			t.Errorf("request body FromEmail = %q, want new@example.com", sent.FromEmail)
+		}
+		if sent.Name != "New Sender" {
+			t.Errorf("request body Name = %q, want New Sender", sent.Name)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -170,12 +196,27 @@ func TestEditSignature_Success(t *testing.T) {
 		Name: "Updated Sender",
 	}
 
-	api := New(HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(APITokenOpt("acct-tok"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
 			t.Errorf("expected PUT, got %s", req.Method)
 		}
 		if !strings.Contains(req.URL.Path, "/senders/7") {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "acct-tok" {
+			t.Errorf("X-Postmark-Account-Token = %q, want acct-tok", got)
+		}
+		// Verify the request body contains the expected fields.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		var sent EditSignatureReq
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if sent.Name != "Updated Sender" {
+			t.Errorf("request body Name = %q, want Updated Sender", sent.Name)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
