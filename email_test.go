@@ -8,7 +8,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+// boolPtr is a helper that returns a pointer to the given bool value,
+// needed for SendEmailReq.TrackOpens which is *bool.
+func boolPtr(b bool) *bool { return &b }
 
 // ---- ServerTokenOpt ------------------------------------------------------------
 
@@ -22,9 +27,10 @@ func TestNew_WithServerTokenOpt(t *testing.T) {
 // ---- SendEmail -----------------------------------------------------------------
 
 func TestSendEmail_Success(t *testing.T) {
+	submittedAt := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
 	want := SendEmailResp{
 		To:          "recipient@example.com",
-		SubmittedAt: "2024-01-15T10:00:00Z",
+		SubmittedAt: submittedAt,
 		MessageID:   "msg-id-001",
 		ErrorCode:   0,
 		Message:     "OK",
@@ -68,9 +74,9 @@ func TestSendEmail_Success(t *testing.T) {
 	)
 
 	got, err := api.SendEmail(&SendEmailReq{
-		From:    "sender@example.com",
-		To:      "recipient@example.com",
-		Subject: "Hello",
+		From:     "sender@example.com",
+		To:       "recipient@example.com",
+		Subject:  "Hello",
 		TextBody: "Hello, world!",
 	})
 	if err != nil {
@@ -82,6 +88,9 @@ func TestSendEmail_Success(t *testing.T) {
 	if got.To != want.To {
 		t.Errorf("To = %q, want %q", got.To, want.To)
 	}
+	if !got.SubmittedAt.Equal(want.SubmittedAt) {
+		t.Errorf("SubmittedAt = %v, want %v", got.SubmittedAt, want.SubmittedAt)
+	}
 	if got.ErrorCode != 0 {
 		t.Errorf("ErrorCode = %d, want 0", got.ErrorCode)
 	}
@@ -90,7 +99,7 @@ func TestSendEmail_Success(t *testing.T) {
 func TestSendEmail_AllFields(t *testing.T) {
 	want := SendEmailResp{
 		To:          "to@example.com",
-		SubmittedAt: "2024-06-01T00:00:00Z",
+		SubmittedAt: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
 		MessageID:   "full-msg-id",
 		ErrorCode:   0,
 		Message:     "OK",
@@ -122,6 +131,10 @@ func TestSendEmail_AllFields(t *testing.T) {
 			if parsed.Metadata["key"] != "value" {
 				t.Errorf("unexpected Metadata: %+v", parsed.Metadata)
 			}
+			// TrackOpens must be present and true.
+			if parsed.TrackOpens == nil || !*parsed.TrackOpens {
+				t.Errorf("expected TrackOpens=true, got %v", parsed.TrackOpens)
+			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       jsonBody(t, want),
@@ -139,7 +152,7 @@ func TestSendEmail_AllFields(t *testing.T) {
 		TextBody:      "Hello",
 		ReplyTo:       "reply@example.com",
 		Headers:       []EmailHeader{{Name: "X-Custom", Value: "val"}},
-		TrackOpens:    true,
+		TrackOpens:    boolPtr(true),
 		TrackLinks:    "None",
 		MessageStream: "outbound",
 		Attachments:   []Attachment{{Name: "doc.pdf", Content: "dGVzdA==", ContentType: "application/pdf"}},
@@ -151,6 +164,78 @@ func TestSendEmail_AllFields(t *testing.T) {
 	}
 	if got.MessageID != "full-msg-id" {
 		t.Errorf("MessageID = %q, want full-msg-id", got.MessageID)
+	}
+}
+
+// TestSendEmail_TrackOpensFalse verifies that explicitly setting TrackOpens to
+// false sends the field as false in the JSON body (not omitted), so callers can
+// disable open tracking on streams where it is enabled by default.
+func TestSendEmail_TrackOpensFalse(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			// Unmarshal into a raw map to distinguish absent from false.
+			var raw map[string]interface{}
+			if err := json.Unmarshal(body, &raw); err != nil {
+				t.Fatalf("invalid request body: %v", err)
+			}
+			val, present := raw["TrackOpens"]
+			if !present {
+				t.Error("expected TrackOpens to be present in JSON body, but it was omitted")
+			}
+			if present && val != false {
+				t.Errorf("expected TrackOpens=false, got %v", val)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{Message: "OK"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{
+		From:       "a@b.com",
+		To:         "c@d.com",
+		Subject:    "track off",
+		TextBody:   "hi",
+		TrackOpens: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendEmail_TrackOpensNil verifies that leaving TrackOpens nil omits the
+// field from the JSON body entirely (server default applies).
+func TestSendEmail_TrackOpensNil(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			var raw map[string]interface{}
+			if err := json.Unmarshal(body, &raw); err != nil {
+				t.Fatalf("invalid request body: %v", err)
+			}
+			if _, present := raw["TrackOpens"]; present {
+				t.Error("expected TrackOpens to be absent from JSON body when nil, but it was present")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{Message: "OK"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{
+		From:     "a@b.com",
+		To:       "c@d.com",
+		Subject:  "no track field",
+		TextBody: "hi",
+		// TrackOpens is nil — omitempty should suppress the field.
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -171,6 +256,17 @@ func TestSendEmail_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	// Assert error is a *PostmarkErr with the correct code.
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected error to be PostmarkErr, got %T: %v", err, err)
+	}
+	if pe.ErrorCode != 300 {
+		t.Errorf("ErrorCode = %d, want 300", pe.ErrorCode)
+	}
+	if pe.Message != "Invalid email request" {
+		t.Errorf("Message = %q, want %q", pe.Message, "Invalid email request")
+	}
 }
 
 func TestSendEmail_TransportError(t *testing.T) {
@@ -187,6 +283,17 @@ func TestSendEmail_TransportError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestSendEmail_NilRequest verifies that passing a nil *SendEmailReq to
+// SendEmail returns an error rather than sending a null JSON body.
+func TestSendEmail_NilRequest(t *testing.T) {
+	api := New(ServerTokenOpt("srv-tok"))
+
+	_, err := api.SendEmail(nil)
+	if err == nil {
+		t.Fatal("expected error for nil request, got nil")
 	}
 }
 
@@ -268,6 +375,14 @@ func TestSendEmailBatch_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
+	// Assert the error type and code.
+	var pe PostmarkErr
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pe.ErrorCode != 500 {
+		t.Errorf("ErrorCode = %d, want 500", pe.ErrorCode)
+	}
 }
 
 func TestSendEmailBatch_TransportError(t *testing.T) {
@@ -281,6 +396,28 @@ func TestSendEmailBatch_TransportError(t *testing.T) {
 	_, err := api.SendEmailBatch([]SendEmailReq{{From: "sender@example.com"}})
 	if err == nil {
 		t.Fatal("expected transport error, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestSendEmailBatch_MalformedResponse verifies that a non-JSON response body
+// is reported as an unmarshal error, not silently ignored.
+func TestSendEmailBatch_MalformedResponse(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("not valid json")),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmailBatch([]SendEmailReq{{From: "a@b.com"}})
+	if err == nil {
+		t.Fatal("expected unmarshal error for malformed response, got nil")
 	}
 }
 
@@ -323,6 +460,30 @@ func TestSendEmail_UsesServerTokenEnvFallback(t *testing.T) {
 	)
 
 	_, err := api.SendEmail(&SendEmailReq{From: "a@b.com", To: "c@d.com", Subject: "env test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendEmailBatch_UsesServerTokenEnvFallback verifies that SendEmailBatch
+// also resolves the server token from the POSTMARK_SERVER_TOKEN env var when
+// no ServerTokenOpt is provided.
+func TestSendEmailBatch_UsesServerTokenEnvFallback(t *testing.T) {
+	t.Setenv("POSTMARK_SERVER_TOKEN", "env-batch-token")
+
+	api := New(
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != "env-batch-token" {
+				t.Errorf("expected X-Postmark-Server-Token=env-batch-token, got %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, []SendEmailResp{{Message: "OK"}}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmailBatch([]SendEmailReq{{From: "a@b.com", To: "c@d.com", Subject: "batch env test"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -378,3 +539,35 @@ func TestSendEmailBatch_NotFound(t *testing.T) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
+
+// TestSendEmail_SubmittedAtParsed verifies that SubmittedAt is parsed as a
+// time.Time from the ISO-8601 string returned by Postmark.
+func TestSendEmail_SubmittedAtParsed(t *testing.T) {
+	wantTime := time.Date(2024, 3, 10, 14, 30, 0, 0, time.UTC)
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{
+					To:          "x@y.com",
+					SubmittedAt: wantTime,
+					MessageID:   "ts-check",
+					Message:     "OK",
+				}),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendEmail(&SendEmailReq{From: "a@b.com", To: "x@y.com", Subject: "ts"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.SubmittedAt.Equal(wantTime) {
+		t.Errorf("SubmittedAt = %v, want %v", got.SubmittedAt, wantTime)
+	}
+}
+
+// Ensure the time import is used (compile-time check).
+var _ = time.Time{}
