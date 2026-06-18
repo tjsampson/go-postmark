@@ -122,17 +122,22 @@ func (a *API) newRequest(method, path string, body interface{}) (*http.Request, 
 
 // newServerTokenRequest builds an *http.Request that carries
 // X-Postmark-Server-Token. Bounce and Delivery Stats endpoints require a
-// server-scoped credential. It uses effectiveServerToken() so that callers
-// who only supply APITokenOpt (account token) still get a working credential
-// via the fallback.
+// server-scoped credential. It uses effectiveServerToken() to select the token.
 func (a *API) newServerTokenRequest(method, path string, body interface{}) (*http.Request, error) {
 	return a.newRequestWithAuthHeader(method, path, "X-Postmark-Server-Token", a.effectiveServerToken(), body)
 }
 
 // effectiveServerToken returns the token that should be sent in
-// X-Postmark-Server-Token. It uses the explicitly configured server token
-// when available, and falls back to the account token so that callers who
-// only supply APITokenOpt still work.
+// X-Postmark-Server-Token. When ServerTokenOpt has been supplied it returns
+// that value. Otherwise it falls back to the account token (set via
+// APITokenOpt or the POSTMARK_API_TOKEN environment variable).
+//
+// Note: the fallback exists as a convenience for callers who use a single
+// token for both account- and server-scoped operations (e.g. during testing or
+// in simple single-server setups where the same token is accepted). Production
+// deployments that enforce a strict separation between account and server tokens
+// should always supply ServerTokenOpt — without it the account token will be
+// sent on server-scoped requests, which Postmark will reject with a 401.
 func (a *API) effectiveServerToken() string {
 	if a.serverToken != "" {
 		return a.serverToken

@@ -22,9 +22,10 @@ type (
 		Details     string `json:"Details"`
 		Email       string `json:"Email"`
 		From        string `json:"From"`
-		// BouncedAt is the RFC 3339 timestamp at which the bounce occurred,
+		// BouncedAt is the ISO 8601 timestamp at which the bounce occurred,
 		// stored as a string to preserve the exact format returned by the API.
-		// Callers that need time arithmetic should parse it with time.Parse(time.RFC3339, …).
+		// Callers that need time arithmetic should parse it with time.Parse
+		// (note: Postmark uses ISO 8601, which is not always strict RFC 3339).
 		BouncedAt     string `json:"BouncedAt"`
 		DumpAvailable bool   `json:"DumpAvailable"`
 		Inactive      bool   `json:"Inactive"`
@@ -38,14 +39,14 @@ type (
 	// Postmark treats omitted and zero-valued parameters differently.
 	ListBouncesParams struct {
 		Type          string
-		Inactive      *bool  // nil = omit; &false = send inactive=false; &true = send inactive=true
+		Inactive      *bool // nil = omit; &false = send inactive=false; &true = send inactive=true
 		EmailFilter   string
 		Tag           string
 		MessageID     string
 		FromDate      string
 		ToDate        string
-		Count         *int // nil = omit; pointer to 0 sends count=0
-		Offset        *int // nil = omit; pointer to 0 sends offset=0 (first page)
+		Count         *int // nil = omit; pointer to value sends count=<n>
+		Offset        *int // nil = omit; &0 sends offset=0 (explicit first page)
 		MessageStream string
 	}
 
@@ -90,11 +91,7 @@ func (a *API) ListBounces(params ListBouncesParams) (*ListBouncesResp, error) {
 		q.Set("type", params.Type)
 	}
 	if params.Inactive != nil {
-		if *params.Inactive {
-			q.Set("inactive", "true")
-		} else {
-			q.Set("inactive", "false")
-		}
+		q.Set("inactive", strconv.FormatBool(*params.Inactive))
 	}
 	if params.EmailFilter != "" {
 		q.Set("emailFilter", params.EmailFilter)
@@ -121,8 +118,12 @@ func (a *API) ListBounces(params ListBouncesParams) (*ListBouncesResp, error) {
 		q.Set("messagestream", params.MessageStream)
 	}
 
-	u := url.URL{Path: "bounces", RawQuery: q.Encode()}
-	req, err := a.newServerTokenRequest(http.MethodGet, u.String(), nil)
+	path := "bounces"
+	if encoded := q.Encode(); encoded != "" {
+		path = "bounces?" + encoded
+	}
+
+	req, err := a.newServerTokenRequest(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}

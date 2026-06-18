@@ -24,7 +24,7 @@ func TestListBounces_Success(t *testing.T) {
 		},
 	}
 
-	api := New(APITokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -236,7 +236,7 @@ func TestGetBounce_Success(t *testing.T) {
 		Subject:       "Welcome!",
 	}
 
-	api := New(APITokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -321,7 +321,7 @@ func TestGetBounce_APIError(t *testing.T) {
 func TestGetBounceDump_Success(t *testing.T) {
 	want := BounceDumpResp{Body: "Received: from mail.example.com\r\nSubject: Test\r\n\r\nBody text"}
 
-	api := New(APITokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -414,7 +414,7 @@ func TestActivateBounce_Success(t *testing.T) {
 		Bounce:  wantBounce,
 	}
 
-	api := New(APITokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodPut {
 			t.Errorf("expected PUT, got %s", req.Method)
 		}
@@ -497,7 +497,7 @@ func TestGetDeliveryStats_Success(t *testing.T) {
 		},
 	}
 
-	api := New(APITokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+	api := New(ServerTokenOpt("test-server-token"), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -579,8 +579,8 @@ func TestGetDeliveryStats_APIError(t *testing.T) {
 // ---- ServerToken header sanity -------------------------------------------------
 
 // TestServerTokenHeader_AllEndpoints verifies that all bounce/delivery-stats
-// endpoints use X-Postmark-Server-Token with the correct value and do not leak
-// X-Postmark-Account-Token.
+// endpoints send X-Postmark-Server-Token with the value from ServerTokenOpt
+// and do not leak X-Postmark-Account-Token onto those requests.
 func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	const token = "server-tok-xyz"
 
@@ -595,7 +595,7 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	}
 
 	t.Run("ListBounces", func(t *testing.T) {
-		api := New(APITokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, ListBouncesResp{})}, nil
 		})))
@@ -603,7 +603,7 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	})
 
 	t.Run("GetBounce", func(t *testing.T) {
-		api := New(APITokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, BounceResp{})}, nil
 		})))
@@ -611,7 +611,7 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	})
 
 	t.Run("GetBounceDump", func(t *testing.T) {
-		api := New(APITokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, BounceDumpResp{})}, nil
 		})))
@@ -619,7 +619,7 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	})
 
 	t.Run("ActivateBounce", func(t *testing.T) {
-		api := New(APITokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, ActivateBounceResp{})}, nil
 		})))
@@ -627,7 +627,7 @@ func TestServerTokenHeader_AllEndpoints(t *testing.T) {
 	})
 
 	t.Run("GetDeliveryStats", func(t *testing.T) {
-		api := New(APITokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+		api := New(ServerTokenOpt(token), HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			checkHeaders(t, req)
 			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, DeliveryStatsResp{})}, nil
 		})))
@@ -648,6 +648,30 @@ func TestServerTokenOpt(t *testing.T) {
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if got := req.Header.Get("X-Postmark-Server-Token"); got != serverToken {
 				t.Errorf("X-Postmark-Server-Token = %q, want %q", got, serverToken)
+			}
+			if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
+				t.Errorf("X-Postmark-Account-Token must be absent on server-token requests, got %q", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, ListBouncesResp{})}, nil
+		})),
+	)
+	api.ListBounces(ListBouncesParams{}) //nolint:errcheck
+}
+
+// TestServerTokenFallback verifies that when no ServerTokenOpt is provided,
+// effectiveServerToken falls back to the account token. This is the documented
+// convenience behaviour for callers who use a single token.
+func TestServerTokenFallback(t *testing.T) {
+	const accountToken = "acct-token"
+
+	api := New(
+		APITokenOpt(accountToken),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// Without ServerTokenOpt the fallback sends the account token value
+			// in X-Postmark-Server-Token. X-Postmark-Account-Token must still
+			// be absent because newServerTokenRequest only sets the server header.
+			if got := req.Header.Get("X-Postmark-Server-Token"); got != accountToken {
+				t.Errorf("X-Postmark-Server-Token = %q, want %q (fallback to account token)", got, accountToken)
 			}
 			if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
 				t.Errorf("X-Postmark-Account-Token must be absent on server-token requests, got %q", got)
