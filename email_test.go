@@ -1,0 +1,1259 @@
+package postmark
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// boolPtr is a helper that returns a pointer to the given bool value.
+// It is used in tests to populate *bool fields such as TrackOpens and InlineCss.
+func boolPtr(b bool) *bool { return &b }
+
+// ---- ServerTokenOpt ------------------------------------------------------------
+
+func TestNew_WithServerTokenOpt(t *testing.T) {
+	api := New(ServerTokenOpt("srv-tok-abc"))
+	if api.serverToken != "srv-tok-abc" {
+		t.Errorf("expected serverToken srv-tok-abc, got %s", api.serverToken)
+	}
+}
+
+// ---- newServerRequest zero-value guard -----------------------------------------
+
+// TestNewServerRequest_EmptyToken verifies that email methods return a clear
+// error when no server token has been configured, rather than silently sending
+// an empty X-Postmark-Server-Token header.
+func TestNewServerRequest_EmptyToken(t *testing.T) {
+	// Create an API with no ServerTokenOpt — serverToken remains "".
+	api := New(
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called when serverToken is empty")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "a@a.com", To: "b@b.com"})
+	if err == nil {
+		t.Fatal("expected error for missing server token, got nil")
+	}
+	if !strings.Contains(err.Error(), "server token") {
+		t.Errorf("error message should mention 'server token', got: %v", err)
+	}
+}
+
+// ---- SendEmail -----------------------------------------------------------------
+
+func TestSendEmail_Success(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     *SendEmailReq
+		resp    SendEmailResp
+		wantErr bool
+	}{
+		{
+			name: "basic send",
+			req: &SendEmailReq{
+				From:     "sender@example.com",
+				To:       "recipient@example.com",
+				Subject:  "Hello",
+				TextBody: "Hello world",
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "msg-001",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "html email with attachments",
+			req: &SendEmailReq{
+				From:     "sender@example.com",
+				To:       "recipient@example.com",
+				Subject:  "HTML Email",
+				HtmlBody: "<h1>Hello</h1>",
+				Attachments: []EmailAttachment{
+					{Name: "file.pdf", Content: "base64data", ContentType: "application/pdf"},
+				},
+				Headers: []EmailHeader{
+					{Name: "X-Custom", Value: "value"},
+				},
+				Metadata:      map[string]string{"key": "val"},
+				TrackOpens:    boolPtr(true),
+				TrackLinks:    "HtmlAndText",
+				MessageStream: "outbound",
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "msg-002",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "email with Cc/Bcc/ReplyTo/Tag",
+			req: &SendEmailReq{
+				From:     "sender@example.com",
+				To:       "a@example.com",
+				Cc:       "b@example.com",
+				Bcc:      "c@example.com",
+				ReplyTo:  "reply@example.com",
+				Tag:      "welcome",
+				Subject:  "Welcome",
+				TextBody: "Hi",
+			},
+			resp: SendEmailResp{
+				To:        "a@example.com",
+				MessageID: "msg-003",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "explicit TrackOpens false",
+			req: &SendEmailReq{
+				From:       "sender@example.com",
+				To:         "recipient@example.com",
+				Subject:    "No tracking",
+				TrackOpens: boolPtr(false),
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "msg-004",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header, got %q", req.Header.Get("X-Postmark-Server-Token"))
+					}
+					// Ensure account token header is NOT set on email endpoints
+					if req.Header.Get("X-Postmark-Account-Token") != "" {
+						t.Errorf("X-Postmark-Account-Token should not be set for email endpoints")
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resp),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendEmail(tc.req)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("SendEmail() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if err == nil {
+				if got.MessageID != tc.resp.MessageID {
+					t.Errorf("MessageID = %q, want %q", got.MessageID, tc.resp.MessageID)
+				}
+				if got.To != tc.resp.To {
+					t.Errorf("To = %q, want %q", got.To, tc.resp.To)
+				}
+			}
+		})
+	}
+}
+
+// TestSendEmail_TrackOpensFalse verifies that an explicit false for TrackOpens
+// is serialised into the request body (not silently dropped by omitempty).
+func TestSendEmail_TrackOpensFalse(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			var body SendEmailReq
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			if body.TrackOpens == nil {
+				t.Error("TrackOpens should not be nil when explicitly set to false")
+			} else if *body.TrackOpens != false {
+				t.Errorf("TrackOpens = %v, want false", *body.TrackOpens)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.SendEmail(&SendEmailReq{
+		From:       "a@a.com",
+		To:         "b@b.com",
+		TrackOpens: boolPtr(false),
+	})
+}
+
+// TestSendEmail_ErrorCodeSurfaced verifies that a non-zero ErrorCode in an
+// otherwise HTTP-200 response is surfaced as a Go error. Postmark returns HTTP
+// 200 for per-message failures inside batch-like contexts; callers should not
+// need to manually inspect ErrorCode.
+func TestSendEmail_ErrorCodeSurfaced(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{ErrorCode: 406, Message: "Inactive recipient"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "a@a.com", To: "b@b.com"})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 response, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 406 {
+		t.Errorf("ErrorCode = %d, want 406", pmErr.ErrorCode)
+	}
+}
+
+func TestSendEmail_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 422, Message: "Invalid email address"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusUnprocessableEntity,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "bad", To: "bad"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestSendEmail_NotFound(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "not found"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendEmail(&SendEmailReq{From: "a@b.com", To: "c@d.com"})
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+	}
+}
+
+// ---- SendBatch -----------------------------------------------------------------
+
+func TestSendBatch_Success(t *testing.T) {
+	tests := []struct {
+		name  string
+		reqs  []SendEmailReq
+		resps []SendEmailResp
+	}{
+		{
+			name: "single message batch",
+			reqs: []SendEmailReq{
+				{From: "a@a.com", To: "b@b.com", Subject: "Hi", TextBody: "Hello"},
+			},
+			resps: []SendEmailResp{
+				{To: "b@b.com", MessageID: "batch-001", ErrorCode: 0, Message: "OK"},
+			},
+		},
+		{
+			name: "multi message batch",
+			reqs: []SendEmailReq{
+				{From: "a@a.com", To: "b@b.com", Subject: "Hi 1"},
+				{From: "a@a.com", To: "c@c.com", Subject: "Hi 2"},
+			},
+			resps: []SendEmailResp{
+				{To: "b@b.com", MessageID: "batch-002", ErrorCode: 0, Message: "OK"},
+				{To: "c@c.com", MessageID: "batch-003", ErrorCode: 0, Message: "OK"},
+			},
+		},
+		{
+			name:  "empty batch",
+			reqs:  []SendEmailReq{},
+			resps: []SendEmailResp{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email/batch") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header")
+					}
+					// Verify the request body is a bare JSON array (no wrapper object).
+					var body []SendEmailReq
+					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+						t.Errorf("failed to decode request body as bare array: %v", err)
+					}
+					if len(body) != len(tc.reqs) {
+						t.Errorf("body array length = %d, want %d", len(body), len(tc.reqs))
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resps),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendBatch(tc.reqs)
+			if err != nil {
+				t.Fatalf("SendBatch() unexpected error: %v", err)
+			}
+			if len(got) != len(tc.resps) {
+				t.Errorf("got %d responses, want %d", len(got), len(tc.resps))
+			}
+			for i, r := range got {
+				if r.MessageID != tc.resps[i].MessageID {
+					t.Errorf("[%d] MessageID = %q, want %q", i, r.MessageID, tc.resps[i].MessageID)
+				}
+			}
+		})
+	}
+}
+
+// TestSendBatch_BareJSONArray verifies that the wire format sent to
+// POST /email/batch is a bare JSON array, NOT a wrapped object like
+// {"Messages":[…]}. The Postmark /email/batch API expects a top-level array.
+func TestSendBatch_BareJSONArray(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// The body must decode as a JSON array, not an object.
+			var raw json.RawMessage
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if len(raw) == 0 || raw[0] != '[' {
+				t.Errorf("expected bare JSON array for /email/batch, got: %s", string(raw))
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, []SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, err := api.SendBatch([]SendEmailReq{
+		{From: "a@a.com", To: "b@b.com", Subject: "Test"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendBatch_PerItemErrorCode verifies the documented contract for batch
+// endpoints: Postmark returns HTTP 200 even when individual messages fail.
+// The library does NOT aggregate per-item errors into a Go error because partial
+// success is a valid outcome. Callers must inspect ErrorCode on each element.
+func TestSendBatch_PerItemErrorCode(t *testing.T) {
+	// Simulate a batch where the first message succeeds and the second fails.
+	batchResp := []SendEmailResp{
+		{To: "ok@example.com", MessageID: "msg-ok", ErrorCode: 0, Message: "OK"},
+		{To: "bad@example.com", ErrorCode: 406, Message: "Inactive recipient"},
+	}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, batchResp),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendBatch([]SendEmailReq{
+		{From: "a@a.com", To: "ok@example.com"},
+		{From: "a@a.com", To: "bad@example.com"},
+	})
+
+	// SendBatch must NOT return a Go error for per-item failures — the HTTP
+	// response is 200 and partial success is expected.
+	if err != nil {
+		t.Fatalf("SendBatch() should not return a Go error for per-item failures, got: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(got))
+	}
+	// The successful element must have ErrorCode 0.
+	if got[0].ErrorCode != 0 {
+		t.Errorf("got[0].ErrorCode = %d, want 0", got[0].ErrorCode)
+	}
+	// The failed element must expose ErrorCode 406 so the caller can act on it.
+	if got[1].ErrorCode != 406 {
+		t.Errorf("got[1].ErrorCode = %d, want 406", got[1].ErrorCode)
+	}
+	if got[1].Message != "Inactive recipient" {
+		t.Errorf("got[1].Message = %q, want %q", got[1].Message, "Inactive recipient")
+	}
+}
+
+func TestSendBatch_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal error"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendBatch([]SendEmailReq{{From: "a@a.com", To: "b@b.com"}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- SendWithTemplate ----------------------------------------------------------
+
+func TestSendWithTemplate_Success(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *SendTemplateReq
+		resp SendEmailResp
+	}{
+		{
+			name: "by template ID",
+			req: &SendTemplateReq{
+				From:       "sender@example.com",
+				To:         "recipient@example.com",
+				TemplateID: 12345,
+				TemplateModel: map[string]interface{}{
+					"name":    "Alice",
+					"product": "Postmark",
+				},
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "tmpl-001",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "by template alias",
+			req: &SendTemplateReq{
+				From:          "sender@example.com",
+				To:            "recipient@example.com",
+				TemplateAlias: "welcome-email",
+				TemplateModel: map[string]interface{}{
+					"name": "Bob",
+				},
+				TrackOpens:    boolPtr(true),
+				TrackLinks:    "HtmlOnly",
+				MessageStream: "outbound",
+				Metadata:      map[string]string{"campaign": "summer"},
+				Headers: []EmailHeader{
+					{Name: "X-Campaign", Value: "summer"},
+				},
+				Attachments: []EmailAttachment{
+					{Name: "info.pdf", Content: "data", ContentType: "application/pdf"},
+				},
+				InlineCss: boolPtr(true),
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "tmpl-002",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "with Cc/Bcc/ReplyTo/Tag",
+			req: &SendTemplateReq{
+				From:          "sender@example.com",
+				To:            "a@example.com",
+				Cc:            "b@example.com",
+				Bcc:           "c@example.com",
+				ReplyTo:       "reply@example.com",
+				Tag:           "transactional",
+				TemplateAlias: "invoice",
+			},
+			resp: SendEmailResp{
+				To:        "a@example.com",
+				MessageID: "tmpl-003",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "with Subject override",
+			req: &SendTemplateReq{
+				From:          "sender@example.com",
+				To:            "recipient@example.com",
+				TemplateAlias: "promo",
+				Subject:       "This week's deals",
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "tmpl-004",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+		{
+			name: "explicit InlineCss false",
+			req: &SendTemplateReq{
+				From:          "sender@example.com",
+				To:            "recipient@example.com",
+				TemplateAlias: "no-css",
+				InlineCss:     boolPtr(false),
+			},
+			resp: SendEmailResp{
+				To:        "recipient@example.com",
+				MessageID: "tmpl-005",
+				ErrorCode: 0,
+				Message:   "OK",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email/withTemplate") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header")
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resp),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendWithTemplate(tc.req)
+			if err != nil {
+				t.Fatalf("SendWithTemplate() unexpected error: %v", err)
+			}
+			if got.MessageID != tc.resp.MessageID {
+				t.Errorf("MessageID = %q, want %q", got.MessageID, tc.resp.MessageID)
+			}
+		})
+	}
+}
+
+// TestSendWithTemplate_InlineCssFalse verifies that an explicit false for
+// InlineCss is serialised into the request body (not silently dropped).
+func TestSendWithTemplate_InlineCssFalse(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			var body SendTemplateReq
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			if body.InlineCss == nil {
+				t.Error("InlineCss should not be nil when explicitly set to false")
+			} else if *body.InlineCss != false {
+				t.Errorf("InlineCss = %v, want false", *body.InlineCss)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.SendWithTemplate(&SendTemplateReq{
+		From:          "a@a.com",
+		To:            "b@b.com",
+		TemplateAlias: "t",
+		InlineCss:     boolPtr(false),
+	})
+}
+
+// TestSendWithTemplate_TemplateIDSerialised verifies that TemplateID (renamed
+// from TemplateId for idiomatic Go) is still marshalled as "TemplateId" in the
+// JSON body, matching what the Postmark API expects.
+func TestSendWithTemplate_TemplateIDSerialised(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			val, ok := raw["TemplateId"]
+			if !ok {
+				t.Error("expected 'TemplateId' key in JSON body (Postmark API requires this casing)")
+			} else {
+				var id int64
+				if err := json.Unmarshal(val, &id); err != nil || id != 99 {
+					t.Errorf("TemplateId in JSON = %s, want 99", val)
+				}
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.SendWithTemplate(&SendTemplateReq{
+		From:       "a@a.com",
+		To:         "b@b.com",
+		TemplateID: 99,
+	})
+}
+
+// TestSendWithTemplate_ErrorCodeSurfaced verifies that a non-zero ErrorCode in
+// an HTTP-200 response is surfaced as a Go error.
+func TestSendWithTemplate_ErrorCodeSurfaced(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, SendEmailResp{ErrorCode: 1101, Message: "template not found"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateAlias: "missing"})
+	if err == nil {
+		t.Fatal("expected error for non-zero ErrorCode in 200 response, got nil")
+	}
+	var pmErr PostmarkErr
+	if !errors.As(err, &pmErr) {
+		t.Errorf("expected PostmarkErr, got %T: %v", err, err)
+	}
+	if pmErr.ErrorCode != 1101 {
+		t.Errorf("ErrorCode = %d, want 1101", pmErr.ErrorCode)
+	}
+}
+
+func TestSendWithTemplate_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 1101, Message: "template not found"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusUnprocessableEntity,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateID: 9999})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- SendBatchWithTemplates ----------------------------------------------------
+
+func TestSendBatchWithTemplates_Success(t *testing.T) {
+	tests := []struct {
+		name  string
+		reqs  []SendTemplateReq
+		resps []SendEmailResp
+	}{
+		{
+			name: "single templated message",
+			reqs: []SendTemplateReq{
+				{From: "a@a.com", To: "b@b.com", TemplateID: 1},
+			},
+			resps: []SendEmailResp{
+				{To: "b@b.com", MessageID: "btmpl-001", ErrorCode: 0, Message: "OK"},
+			},
+		},
+		{
+			name: "multiple templated messages",
+			reqs: []SendTemplateReq{
+				{From: "a@a.com", To: "b@b.com", TemplateAlias: "welcome"},
+				{From: "a@a.com", To: "c@c.com", TemplateAlias: "confirmation"},
+			},
+			resps: []SendEmailResp{
+				{To: "b@b.com", MessageID: "btmpl-002", ErrorCode: 0, Message: "OK"},
+				{To: "c@c.com", MessageID: "btmpl-003", ErrorCode: 0, Message: "OK"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email/batchWithTemplates") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header")
+					}
+					// Verify the request body wraps messages in a "Messages" key
+					// (Postmark batchWithTemplates requires {"Messages":[…]}).
+					var body batchTemplateReqWrapper
+					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+						t.Errorf("failed to decode request body: %v", err)
+					}
+					if len(body.Messages) != len(tc.reqs) {
+						t.Errorf("body.Messages length = %d, want %d", len(body.Messages), len(tc.reqs))
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resps),
+					}, nil
+				})),
+			)
+
+			got, err := api.SendBatchWithTemplates(tc.reqs)
+			if err != nil {
+				t.Fatalf("SendBatchWithTemplates() unexpected error: %v", err)
+			}
+			if len(got) != len(tc.resps) {
+				t.Errorf("got %d responses, want %d", len(got), len(tc.resps))
+			}
+			for i, r := range got {
+				if r.MessageID != tc.resps[i].MessageID {
+					t.Errorf("[%d] MessageID = %q, want %q", i, r.MessageID, tc.resps[i].MessageID)
+				}
+			}
+		})
+	}
+}
+
+// TestSendBatchWithTemplates_WrapsMessages verifies that the wire format for
+// POST /email/batchWithTemplates is {"Messages":[…]} (a wrapped object), which
+// is what the Postmark API requires for this endpoint.
+func TestSendBatchWithTemplates_WrapsMessages(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if _, ok := raw["Messages"]; !ok {
+				t.Error("expected 'Messages' key in request body for batchWithTemplates")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, []SendEmailResp{}),
+			}, nil
+		})),
+	)
+	_, err := api.SendBatchWithTemplates([]SendTemplateReq{
+		{From: "a@a.com", To: "b@b.com", TemplateID: 1},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSendBatchWithTemplates_PerItemErrorCode verifies the documented contract
+// for batch endpoints: Postmark returns HTTP 200 even when individual messages
+// fail. The library does NOT aggregate per-item errors into a Go error; callers
+// must inspect ErrorCode on each element.
+func TestSendBatchWithTemplates_PerItemErrorCode(t *testing.T) {
+	batchResp := []SendEmailResp{
+		{To: "ok@example.com", MessageID: "msg-ok", ErrorCode: 0, Message: "OK"},
+		{To: "bad@example.com", ErrorCode: 1101, Message: "Template not found"},
+	}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, batchResp),
+			}, nil
+		})),
+	)
+
+	got, err := api.SendBatchWithTemplates([]SendTemplateReq{
+		{From: "a@a.com", To: "ok@example.com", TemplateID: 1},
+		{From: "a@a.com", To: "bad@example.com", TemplateID: 9999},
+	})
+
+	// SendBatchWithTemplates must NOT return a Go error for per-item failures.
+	if err != nil {
+		t.Fatalf("SendBatchWithTemplates() should not return a Go error for per-item failures, got: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(got))
+	}
+	if got[0].ErrorCode != 0 {
+		t.Errorf("got[0].ErrorCode = %d, want 0", got[0].ErrorCode)
+	}
+	if got[1].ErrorCode != 1101 {
+		t.Errorf("got[1].ErrorCode = %d, want 1101", got[1].ErrorCode)
+	}
+}
+
+func TestSendBatchWithTemplates_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateID: 1}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- CreateBulkJob -------------------------------------------------------------
+
+func TestCreateBulkJob_Success(t *testing.T) {
+	tests := []struct {
+		name string
+		reqs []SendEmailReq
+		resp BulkJobResp
+	}{
+		{
+			name: "single message bulk",
+			reqs: []SendEmailReq{
+				{From: "a@a.com", To: "b@b.com", Subject: "Bulk 1"},
+			},
+			resp: BulkJobResp{
+				ID:         "bulk-job-001",
+				Status:     "Queued",
+				TotalCount: 1,
+			},
+		},
+		{
+			name: "multiple messages bulk",
+			reqs: []SendEmailReq{
+				{From: "a@a.com", To: "b@b.com", Subject: "Bulk A"},
+				{From: "a@a.com", To: "c@c.com", Subject: "Bulk B"},
+				{From: "a@a.com", To: "d@d.com", Subject: "Bulk C"},
+			},
+			resp: BulkJobResp{
+				ID:           "bulk-job-002",
+				Status:       "Processing",
+				TotalCount:   3,
+				SuccessCount: 2,
+				ErrorCount:   1,
+			},
+		},
+		{
+			name: "completed bulk job with batches",
+			reqs: []SendEmailReq{
+				{From: "a@a.com", To: "b@b.com", Subject: "Bulk X"},
+			},
+			resp: BulkJobResp{
+				ID:                    "bulk-job-003",
+				Status:                "Completed",
+				TotalCount:            1,
+				SuccessCount:          1,
+				StartedProcessingAt:   "2024-06-01T10:00:00Z",
+				CompletedProcessingAt: "2024-06-01T10:01:00Z",
+				Batches: []BulkJobBatch{
+					{
+						StartedAt:    "2024-06-01T10:00:00Z",
+						CompletedAt:  "2024-06-01T10:01:00Z",
+						TotalCount:   1,
+						SuccessCount: 1,
+						ErrorCount:   0,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", req.Method)
+					}
+					if !strings.HasSuffix(req.URL.Path, "/email/bulk") {
+						t.Errorf("unexpected path: %s", req.URL.Path)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header")
+					}
+					// Verify the request body is a bare JSON array (no wrapper object).
+					var body []SendEmailReq
+					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+						t.Errorf("failed to decode request body as bare array: %v", err)
+					}
+					if len(body) != len(tc.reqs) {
+						t.Errorf("body array length = %d, want %d", len(body), len(tc.reqs))
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resp),
+					}, nil
+				})),
+			)
+
+			got, err := api.CreateBulkJob(tc.reqs)
+			if err != nil {
+				t.Fatalf("CreateBulkJob() unexpected error: %v", err)
+			}
+			if got.ID != tc.resp.ID {
+				t.Errorf("ID = %q, want %q", got.ID, tc.resp.ID)
+			}
+			if got.Status != tc.resp.Status {
+				t.Errorf("Status = %q, want %q", got.Status, tc.resp.Status)
+			}
+			if got.TotalCount != tc.resp.TotalCount {
+				t.Errorf("TotalCount = %d, want %d", got.TotalCount, tc.resp.TotalCount)
+			}
+			if got.StartedProcessingAt != tc.resp.StartedProcessingAt {
+				t.Errorf("StartedProcessingAt = %q, want %q", got.StartedProcessingAt, tc.resp.StartedProcessingAt)
+			}
+			if got.CompletedProcessingAt != tc.resp.CompletedProcessingAt {
+				t.Errorf("CompletedProcessingAt = %q, want %q", got.CompletedProcessingAt, tc.resp.CompletedProcessingAt)
+			}
+			if len(got.Batches) != len(tc.resp.Batches) {
+				t.Errorf("Batches length = %d, want %d", len(got.Batches), len(tc.resp.Batches))
+			}
+		})
+	}
+}
+
+// TestCreateBulkJob_BareJSONArray verifies that the wire format sent to
+// POST /email/bulk is a bare JSON array, NOT a wrapped object like
+// {"Messages":[…]}. The Postmark /email/bulk API expects a top-level array.
+func TestCreateBulkJob_BareJSONArray(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// The body must decode as a JSON array, not an object.
+			var raw json.RawMessage
+			if err := json.NewDecoder(req.Body).Decode(&raw); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if len(raw) == 0 || raw[0] != '[' {
+				t.Errorf("expected bare JSON array for /email/bulk, got: %s", string(raw))
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, BulkJobResp{ID: "job-1", Status: "Queued"}),
+			}, nil
+		})),
+	)
+	_, err := api.CreateBulkJob([]SendEmailReq{
+		{From: "a@a.com", To: "b@b.com", Subject: "Test"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateBulkJob_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "bulk error"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.CreateBulkJob([]SendEmailReq{{From: "a@a.com", To: "b@b.com"}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- GetBulkJob ----------------------------------------------------------------
+
+func TestGetBulkJob_Success(t *testing.T) {
+	tests := []struct {
+		name  string
+		jobID string
+		resp  BulkJobResp
+	}{
+		{
+			name:  "queued job",
+			jobID: "bulk-job-001",
+			resp: BulkJobResp{
+				ID:         "bulk-job-001",
+				CreatedAt:  "2024-01-01T00:00:00Z",
+				Status:     "Queued",
+				TotalCount: 5,
+			},
+		},
+		{
+			name:  "completed job",
+			jobID: "bulk-job-002",
+			resp: BulkJobResp{
+				ID:                    "bulk-job-002",
+				CreatedAt:             "2024-01-02T00:00:00Z",
+				Status:                "Completed",
+				TotalCount:            10,
+				SuccessCount:          9,
+				ErrorCount:            1,
+				StartedProcessingAt:   "2024-01-02T00:00:05Z",
+				CompletedProcessingAt: "2024-01-02T00:01:00Z",
+				Batches: []BulkJobBatch{
+					{
+						StartedAt:    "2024-01-02T00:00:05Z",
+						CompletedAt:  "2024-01-02T00:01:00Z",
+						TotalCount:   10,
+						SuccessCount: 9,
+						ErrorCount:   1,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := New(
+				ServerTokenOpt("srv-tok"),
+				HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodGet {
+						t.Errorf("expected GET, got %s", req.Method)
+					}
+					wantPath := "/email/bulk/" + tc.jobID
+					if !strings.HasSuffix(req.URL.Path, wantPath) {
+						t.Errorf("unexpected path: %s, want suffix %s", req.URL.Path, wantPath)
+					}
+					if req.Header.Get("X-Postmark-Server-Token") != "srv-tok" {
+						t.Errorf("expected X-Postmark-Server-Token header")
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       jsonBody(t, tc.resp),
+					}, nil
+				})),
+			)
+
+			got, err := api.GetBulkJob(tc.jobID)
+			if err != nil {
+				t.Fatalf("GetBulkJob() unexpected error: %v", err)
+			}
+			if got.ID != tc.resp.ID {
+				t.Errorf("ID = %q, want %q", got.ID, tc.resp.ID)
+			}
+			if got.Status != tc.resp.Status {
+				t.Errorf("Status = %q, want %q", got.Status, tc.resp.Status)
+			}
+			if got.SuccessCount != tc.resp.SuccessCount {
+				t.Errorf("SuccessCount = %d, want %d", got.SuccessCount, tc.resp.SuccessCount)
+			}
+			if got.ErrorCount != tc.resp.ErrorCount {
+				t.Errorf("ErrorCount = %d, want %d", got.ErrorCount, tc.resp.ErrorCount)
+			}
+			if got.StartedProcessingAt != tc.resp.StartedProcessingAt {
+				t.Errorf("StartedProcessingAt = %q, want %q", got.StartedProcessingAt, tc.resp.StartedProcessingAt)
+			}
+			if got.CompletedProcessingAt != tc.resp.CompletedProcessingAt {
+				t.Errorf("CompletedProcessingAt = %q, want %q", got.CompletedProcessingAt, tc.resp.CompletedProcessingAt)
+			}
+			if len(got.Batches) != len(tc.resp.Batches) {
+				t.Errorf("Batches length = %d, want %d", len(got.Batches), len(tc.resp.Batches))
+			}
+		})
+	}
+}
+
+// TestGetBulkJob_EmptyID verifies that GetBulkJob returns an error immediately
+// when called with an empty id, preventing a malformed request to Postmark.
+func TestGetBulkJob_EmptyID(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			t.Error("HTTP client should not be called for empty id")
+			return nil, nil
+		})),
+	)
+
+	_, err := api.GetBulkJob("")
+	if err == nil {
+		t.Fatal("expected error for empty id, got nil")
+	}
+}
+
+// TestGetBulkJob_URLEncoding verifies that special characters in a job ID are
+// percent-encoded in the URL path so callers cannot inject extra path segments.
+func TestGetBulkJob_URLEncoding(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			// net/http decodes %2F back to / in req.URL.Path; the encoded form is
+			// only preserved in req.URL.RawPath. Verify RawPath contains %2F so
+			// the slash in the job ID cannot open a new path segment on the wire.
+			rawPath := req.URL.RawPath
+			if rawPath == "" {
+				rawPath = req.URL.Path // fallback: no encoding needed
+			}
+			if !strings.Contains(rawPath, "bulk%2Fextra") {
+				t.Errorf("expected %%2F-encoded slash in RawPath, got: %s", rawPath)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       jsonBody(t, BulkJobResp{}),
+			}, nil
+		})),
+	)
+	_, _ = api.GetBulkJob("bulk/extra")
+}
+
+func TestGetBulkJob_NotFound(t *testing.T) {
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       jsonBody(t, PostmarkErr{ErrorCode: 0, Message: "not found"}),
+			}, nil
+		})),
+	)
+
+	_, err := api.GetBulkJob("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected ErrNotFound, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected errors.Is(err, ErrNotFound), got %v", err)
+	}
+}
+
+func TestGetBulkJob_APIError(t *testing.T) {
+	pmErr := PostmarkErr{ErrorCode: 500, Message: "server error"}
+
+	api := New(
+		ServerTokenOpt("srv-tok"),
+		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       jsonBody(t, pmErr),
+			}, nil
+		})),
+	)
+
+	_, err := api.GetBulkJob("job-123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- Auth header isolation -----------------------------------------------------
+
+// TestEmailEndpoints_UseServerToken verifies that all email endpoints send
+// X-Postmark-Server-Token and do NOT send X-Postmark-Account-Token.
+func TestEmailEndpoints_UseServerToken(t *testing.T) {
+	const serverTok = "my-server-token"
+	const accountTok = "my-account-token"
+
+	checkHeaders := func(t *testing.T, req *http.Request) {
+		t.Helper()
+		if got := req.Header.Get("X-Postmark-Server-Token"); got != serverTok {
+			t.Errorf("X-Postmark-Server-Token = %q, want %q", got, serverTok)
+		}
+		if got := req.Header.Get("X-Postmark-Account-Token"); got != "" {
+			t.Errorf("X-Postmark-Account-Token should be empty for email endpoints, got %q", got)
+		}
+	}
+
+	newAPI := func(handler roundTripFunc) *API {
+		return New(
+			ServerTokenOpt(serverTok),
+			APITokenOpt(accountTok),
+			HTTPClientOpt(newTestClient(handler)),
+		)
+	}
+
+	t.Run("SendEmail", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, SendEmailResp{})}, nil
+		})
+		_, _ = api.SendEmail(&SendEmailReq{From: "a@a.com", To: "b@b.com"})
+	})
+
+	t.Run("SendBatch", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, []SendEmailResp{})}, nil
+		})
+		_, _ = api.SendBatch([]SendEmailReq{{From: "a@a.com", To: "b@b.com"}})
+	})
+
+	t.Run("SendWithTemplate", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, SendEmailResp{})}, nil
+		})
+		_, _ = api.SendWithTemplate(&SendTemplateReq{From: "a@a.com", To: "b@b.com", TemplateID: 1})
+	})
+
+	t.Run("SendBatchWithTemplates", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, []SendEmailResp{})}, nil
+		})
+		_, _ = api.SendBatchWithTemplates([]SendTemplateReq{{From: "a@a.com", To: "b@b.com", TemplateID: 1}})
+	})
+
+	t.Run("CreateBulkJob", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, BulkJobResp{})}, nil
+		})
+		_, _ = api.CreateBulkJob([]SendEmailReq{{From: "a@a.com", To: "b@b.com"}})
+	})
+
+	t.Run("GetBulkJob", func(t *testing.T) {
+		api := newAPI(func(req *http.Request) (*http.Response, error) {
+			checkHeaders(t, req)
+			return &http.Response{StatusCode: http.StatusOK, Body: jsonBody(t, BulkJobResp{})}, nil
+		})
+		_, _ = api.GetBulkJob("job-123")
+	})
+}
