@@ -47,8 +47,7 @@ type (
 )
 
 var (
-	defaultTimeOut    = time.Duration(10) * time.Second
-	defaultHttpClient = &http.Client{Timeout: defaultTimeOut}
+	defaultTimeOut = time.Duration(10) * time.Second
 )
 
 // New creates and returns a new Postmark API client.
@@ -60,7 +59,7 @@ func New(options ...Option) *API {
 		baseHost: "https://api.postmarkapp.com",
 		token:    os.Getenv("POSTMARK_API_TOKEN"),
 		timeout:  defaultTimeOut,
-		client:   defaultHttpClient,
+		client:   &http.Client{Timeout: defaultTimeOut},
 	}
 
 	// Apply Dynamic Caller Opts
