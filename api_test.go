@@ -103,6 +103,62 @@ func TestTimeoutOpt_AppliedToClient(t *testing.T) {
 	}
 }
 
+// TestTimeoutOpt_OrderIndependent_TimeoutThenHTTPClient verifies that when
+// TimeoutOpt is applied before HTTPClientOpt, the injected client's Timeout
+// is reconciled to the value supplied by TimeoutOpt.
+func TestTimeoutOpt_OrderIndependent_TimeoutThenHTTPClient(t *testing.T) {
+	const want = 7 * time.Second
+	injected := &http.Client{} // Timeout is zero initially
+
+	api := New(TimeoutOpt(want), HTTPClientOpt(injected))
+
+	// api.timeout must equal want
+	if api.timeout != want {
+		t.Errorf("api.timeout = %v, want %v", api.timeout, want)
+	}
+
+	// The injected client's Timeout must have been reconciled
+	hc, ok := api.client.(*http.Client)
+	if !ok {
+		t.Fatal("expected api.client to be *http.Client")
+	}
+	if hc.Timeout != want {
+		t.Errorf("injected client Timeout = %v, want %v", hc.Timeout, want)
+	}
+	// Both api.timeout and client.Timeout must be consistent
+	if api.timeout != hc.Timeout {
+		t.Errorf("api.timeout (%v) != client.Timeout (%v); options must be order-independent", api.timeout, hc.Timeout)
+	}
+}
+
+// TestTimeoutOpt_OrderIndependent_HTTPClientThenTimeout verifies that when
+// HTTPClientOpt is applied before TimeoutOpt, the injected client's Timeout
+// is reconciled to the value supplied by TimeoutOpt.
+func TestTimeoutOpt_OrderIndependent_HTTPClientThenTimeout(t *testing.T) {
+	const want = 7 * time.Second
+	injected := &http.Client{} // Timeout is zero initially
+
+	api := New(HTTPClientOpt(injected), TimeoutOpt(want))
+
+	// api.timeout must equal want
+	if api.timeout != want {
+		t.Errorf("api.timeout = %v, want %v", api.timeout, want)
+	}
+
+	// The injected client's Timeout must have been reconciled
+	hc, ok := api.client.(*http.Client)
+	if !ok {
+		t.Fatal("expected api.client to be *http.Client")
+	}
+	if hc.Timeout != want {
+		t.Errorf("injected client Timeout = %v, want %v", hc.Timeout, want)
+	}
+	// Both api.timeout and client.Timeout must be consistent
+	if api.timeout != hc.Timeout {
+		t.Errorf("api.timeout (%v) != client.Timeout (%v); options must be order-independent", api.timeout, hc.Timeout)
+	}
+}
+
 // ---- PostmarkErr ---------------------------------------------------------------
 
 func TestPostmarkErr_Error(t *testing.T) {

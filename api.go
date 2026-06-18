@@ -67,6 +67,15 @@ func New(options ...Option) *API {
 		opt(api)
 	}
 
+	// Reconcile: if the underlying client is an *http.Client and its Timeout
+	// differs from api.timeout (e.g. because TimeoutOpt and HTTPClientOpt were
+	// applied in any order), synchronise the client's timeout to the final value.
+	if hc, ok := api.client.(*http.Client); ok {
+		if hc.Timeout != api.timeout {
+			hc.Timeout = api.timeout
+		}
+	}
+
 	return api
 }
 
