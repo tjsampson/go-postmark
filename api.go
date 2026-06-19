@@ -183,10 +183,12 @@ func (a *API) Do(req *http.Request) (*Resp, error) {
 
 // readResponse reads the body from an *http.Response and returns a *Resp.
 // For non-2xx status codes it attempts to unmarshal a PostmarkErr and returns
-// the appropriate sentinel error so callers can use errors.Is:
-//   - A 404 response returns ErrNotFound.
-//   - A 409 response returns ErrExists.
-//   - Any other non-2xx response returns the unmarshalled PostmarkErr value.
+// the appropriate sentinel error so callers can use errors.Is and errors.As:
+//   - A 404 response returns ErrNotFound (*PostmarkErr).
+//   - A 409 response returns ErrExists (*PostmarkErr).
+//   - Any other non-2xx response returns a *PostmarkErr unmarshalled from the
+//     response body. Returning a pointer keeps the error type consistent with
+//     the sentinel values and allows errors.As(err, &pe) where pe *PostmarkErr.
 func readResponse(resp *http.Response) (*Resp, error) {
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
@@ -209,7 +211,10 @@ func readResponse(resp *http.Response) (*Resp, error) {
 		return newResponse(respBody, resp), fmt.Errorf("failed to unmarshal postmark err: %w", err)
 	}
 
-	return newResponse(respBody, resp), pmError
+	// Return a pointer so that errors.As(err, &pe) where pe is *PostmarkErr
+	// works correctly and is consistent with the pointer-typed sentinel errors
+	// ErrExists and ErrNotFound.
+	return newResponse(respBody, resp), &pmError
 }
 
 // newResponse is a helper constructor for *Resp.
