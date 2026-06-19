@@ -64,6 +64,12 @@ type (
 	Option func(*API)
 )
 
+const (
+	// DefaultMaxRetries is the default maximum number of retry attempts for
+	// transient request failures.
+	DefaultMaxRetries = 7
+)
+
 var (
 	defaultTimeOut = time.Duration(10) * time.Second
 )
