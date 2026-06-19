@@ -21,7 +21,7 @@ func TestListMessageStreams_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -66,7 +66,7 @@ func TestListMessageStreams_StreamTypeFilter(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if !strings.Contains(req.URL.RawQuery, "MessageStreamType=Transactional") {
 				t.Errorf("expected MessageStreamType=Transactional in query, got %s", req.URL.RawQuery)
@@ -94,7 +94,7 @@ func TestListMessageStreams_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 500, Message: "internal server error"}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusInternalServerError,
@@ -127,7 +127,7 @@ func TestGetMessageStream_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet {
 				t.Errorf("expected GET, got %s", req.Method)
@@ -162,7 +162,7 @@ func TestGetMessageStream_Success(t *testing.T) {
 // errors.Is. readResponse in api.go maps HTTP 404 → ErrNotFound directly.
 func TestGetMessageStream_NotFound(t *testing.T) {
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusNotFound,
@@ -195,7 +195,7 @@ func TestCreateMessageStream_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -234,7 +234,7 @@ func TestCreateMessageStream_APIError(t *testing.T) {
 	pmErr := PostmarkErr{ErrorCode: 409, Message: "stream already exists"}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusConflict,
@@ -267,7 +267,7 @@ func TestUpdateMessageStream_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPut {
 				t.Errorf("expected PUT, got %s", req.Method)
@@ -301,7 +301,7 @@ func TestUpdateMessageStream_Success(t *testing.T) {
 // UpdateMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestUpdateMessageStream_NotFound(t *testing.T) {
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusNotFound,
@@ -332,7 +332,7 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -372,7 +372,7 @@ func TestArchiveMessageStream_Success(t *testing.T) {
 // ArchiveMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestArchiveMessageStream_NotFound(t *testing.T) {
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusNotFound,
@@ -406,7 +406,7 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 	}
 
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", req.Method)
@@ -440,7 +440,7 @@ func TestUnarchiveMessageStream_Success(t *testing.T) {
 // UnarchiveMessageStream to return ErrNotFound, detectable via errors.Is.
 func TestUnarchiveMessageStream_NotFound(t *testing.T) {
 	api := New(
-		APITokenOpt("test-server-token"),
+		ServerTokenOpt("test-server-token"),
 		HTTPClientOpt(newTestClient(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusNotFound,
